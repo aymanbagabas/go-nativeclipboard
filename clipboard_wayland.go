@@ -39,13 +39,15 @@ type (
 // Wayland function pointers
 var (
 	libwayland uintptr
+	
+	// Interface pointers exported from libwayland-client
+	wlRegistryInterface uintptr
 
 	wlDisplayConnect      func(name *byte) wlDisplay
 	wlDisplayDisconnect   func(display wlDisplay)
 	wlDisplayRoundtrip    func(display wlDisplay) int32
 	wlDisplayDispatch     func(display wlDisplay) int32
 	wlDisplayFlush        func(display wlDisplay) int32
-	wlDisplayGetRegistry  func(display wlDisplay) wlRegistry
 	wlProxyMarshalFlags   func(proxy wlProxy, opcode uint32, iface uintptr, version uint32, flags uint32, args ...uintptr) wlProxy
 	wlProxyAddListener    func(proxy wlProxy, implementation uintptr, data uintptr) int32
 	wlProxyDestroy        func(proxy wlProxy)
@@ -193,13 +195,20 @@ func initializeWayland() error {
 		purego.RegisterLibFunc(&wlDisplayRoundtrip, libwayland, "wl_display_roundtrip")
 		purego.RegisterLibFunc(&wlDisplayDispatch, libwayland, "wl_display_dispatch")
 		purego.RegisterLibFunc(&wlDisplayFlush, libwayland, "wl_display_flush")
-		purego.RegisterLibFunc(&wlDisplayGetRegistry, libwayland, "wl_display_get_registry")
 		purego.RegisterLibFunc(&wlProxyMarshalFlags, libwayland, "wl_proxy_marshal_flags")
 		purego.RegisterLibFunc(&wlProxyAddListener, libwayland, "wl_proxy_add_listener")
 		purego.RegisterLibFunc(&wlProxyDestroy, libwayland, "wl_proxy_destroy")
 		purego.RegisterLibFunc(&wlProxyGetVersion, libwayland, "wl_proxy_get_version")
 		purego.RegisterLibFunc(&wlProxyMarshal, libwayland, "wl_proxy_marshal")
 		purego.RegisterLibFunc(&wlProxyMarshalConstructor, libwayland, "wl_proxy_marshal_constructor")
+		
+		// Load interface pointers
+		var err2 error
+		wlRegistryInterface, err2 = purego.Dlsym(libwayland, "wl_registry_interface")
+		if err2 != nil {
+			waylandInitErr = fmt.Errorf("%w: failed to load wl_registry_interface: %v", ErrUnavailable, err2)
+			return
+		}
 
 		// Connect to Wayland display
 		waylandState.display = wlDisplayConnect(nil)
@@ -212,8 +221,12 @@ func initializeWayland() error {
 		registryListenerInstance.Global = purego.NewCallback(registryHandleGlobal)
 		registryListenerInstance.GlobalRemove = purego.NewCallback(registryHandleGlobalRemove)
 
-		// Get registry
-		waylandState.registry = wlDisplayGetRegistry(waylandState.display)
+		// Get registry - wl_display_get_registry is opcode 1
+		waylandState.registry = wlRegistry(wlProxyMarshalConstructor(
+			wlProxy(waylandState.display),
+			1, // WL_DISPLAY_GET_REGISTRY opcode
+			wlRegistryInterface,
+		))
 		if waylandState.registry == 0 {
 			waylandInitErr = fmt.Errorf("%w: failed to get registry", ErrUnavailable)
 			return
