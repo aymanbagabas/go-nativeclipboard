@@ -8,11 +8,11 @@ The original [golang.design/x/clipboard](https://github.com/golang-design/clipbo
 
 **Benefits:**
 
-- 🚀 No C compiler needed
-- ⚡ Faster builds
-- 🔄 Easy cross-compilation
-- 📦 Smaller binaries
-- 🎯 Same familiar API
+- No C compiler needed
+- Faster builds
+- Easy cross-compilation
+- Smaller binaries
+- Same familiar API
 
 ## Installation
 
@@ -124,12 +124,12 @@ Use the pre-defined constants:
 
 ## Platform Support
 
-| Platform       | Status      | Implementation                   |
-| -------------- | ----------- | -------------------------------- |
-| macOS          | ✅ Complete | NSPasteboard via purego/objc     |
-| Linux (X11)    | ✅ Complete | X11 via purego (requires libX11) |
-| Linux (Wayland)| 🚧 Planned  | Not yet implemented              |
-| Windows        | ✅ Complete | Win32 API via syscall            |
+| Platform        | Status       | Implementation                   |
+| --------------- | ------------ | -------------------------------- |
+| macOS           | [x] Complete | NSPasteboard via purego/objc     |
+| Linux (X11)     | [x] Complete | X11 via purego (requires libX11) |
+| Linux (Wayland) | [ ] Planned  | Not yet implemented              |
+| Windows         | [x] Complete | Win32 API via syscall            |
 
 ### Linux Requirements
 
