@@ -1,0 +1,4 @@
+github.com/ebitengine/purego v0.10.0-alpha.3.0.20251231181614-6b665882fe54 h1:d/yg6sXpPNSzm8LunEf5DzClocs7kLBfJzNZ/vkbRB4=
+github.com/ebitengine/purego v0.10.0-alpha.3.0.20251231181614-6b665882fe54/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
+golang.org/x/image v0.28.0 h1:gdem5JW1OLS4FbkWgLO+7ZeFzYtL3xClb97GaUzYMFE=
+golang.org/x/image v0.28.0/go.mod h1:GUJYXtnGKEUgggyzh+Vxt+AviiCcyiwpsl8iQ8MvwGY=
