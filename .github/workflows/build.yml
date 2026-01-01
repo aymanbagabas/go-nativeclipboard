@@ -22,6 +22,11 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
+      - name: Install X11 dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev xvfb
       - uses: actions/cache@v4
         with:
           path: ~/go/pkg/mod
@@ -32,5 +37,13 @@ jobs:
         run: go mod download
       - name: Build
         run: go build -v ./...
-      - name: Test
-        run: go test ./...
+      - name: Test (Linux with Xvfb)
+        if: runner.os == 'Linux'
+        run: |
+          Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
+          export DISPLAY=:99.0
+          sleep 2
+          go test -v ./...
+      - name: Test (macOS/Windows)
+        if: runner.os != 'Linux'
+        run: go test -v ./...
