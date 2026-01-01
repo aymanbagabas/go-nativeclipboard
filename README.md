@@ -3,7 +3,7 @@
 <p>
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/aymanbagabas/go-nativeclipboard.svg)](https://pkg.go.dev/github.com/aymanbagabas/go-nativeclipboard)
-[![Go Report Card](https://goreportcard.com/badge/github.com/aymanbagabas/go-nativeclipboard)](https://goreportcard.com/report/github.com/aymanbagabas/go-nativeclipboard)
+[![Go Report Card](https://goreportcard.com/report/github.com/aymanbagabas/go-nativeclipboard)](https://goreportcard.com/report/github.com/aymanbagabas/go-nativeclipboard)
 [![build](https://github.com/aymanbagabas/go-nativeclipboard/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/aymanbagabas/go-nativeclipboard/actions/workflows/build.yml)
 [![Latest Release](https://img.shields.io/github/v/release/aymanbagabas/go-nativeclipboard)](https://github.com/aymanbagabas/go-nativeclipboard/releases/latest)
 
