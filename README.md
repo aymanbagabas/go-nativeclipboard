@@ -174,6 +174,13 @@ Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
 export DISPLAY=:99.0
 ```
 
+**Building on FreeBSD:** When building with `CGO_ENABLED=0` (the default for this library), you need to add special gcflags:
+
+```bash
+go build -gcflags="github.com/ebitengine/purego/internal/fakecgo=-std" ./...
+go test -gcflags="github.com/ebitengine/purego/internal/fakecgo=-std" ./...
+```
+
 **Note:** FreeBSD typically installs X11 libraries to `/usr/local/lib` or `/usr/X11R6/lib`. The library will automatically search these common FreeBSD locations.
 
 ## How It Works
