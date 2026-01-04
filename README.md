@@ -169,8 +169,9 @@ export DISPLAY=:99.0
 sudo pkg install xorg-libraries
 
 # For headless environments
-sudo pkg install xvfb-run
-xvfb-run -a your-go-app
+sudo pkg install xorg-vfbserver
+Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
+export DISPLAY=:99.0
 ```
 
 **Note:** FreeBSD typically installs X11 libraries to `/usr/local/lib` or `/usr/X11R6/lib`. The library will automatically search these common FreeBSD locations.

@@ -57,7 +57,7 @@ jobs:
       matrix:
         os:
           - name: freebsd
-            version: '14.2'
+            version: '15.0'
             architecture: x86-64
     runs-on: ubuntu-latest
     steps:
@@ -72,7 +72,7 @@ jobs:
           architecture: ${{ matrix.os.architecture }}
           run: |
             # Install dependencies
-            sudo pkg install -y go xorg-libraries xvfb-run
+            sudo pkg install -y go xorg-libraries xorg-vfbserver
             
             # Set up environment - NO CGO
             export GO111MODULE=on
@@ -85,4 +85,7 @@ jobs:
             go build -v ./...
             
             # Run tests with virtual display
-            xvfb-run -a go test -v ./...
+            Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
+            export DISPLAY=:99.0
+            sleep 2
+            go test -v ./...
