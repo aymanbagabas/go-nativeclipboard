@@ -1,7 +1,7 @@
 // Copyright 2025 Ayman Bagabas
 // SPDX-License-Identifier: MIT
 
-//go:build linux && !android
+//go:build (linux || freebsd) && !android
 
 package nativeclipboard
 
@@ -93,14 +93,18 @@ var (
 var helpmsg = `%w: Failed to initialize the X11 display, and the clipboard package
 will not work properly. Install the following dependency may help:
 
+	# Debian/Ubuntu
 	apt install -y libx11-dev
 
+	# Fedora/RHEL
+	dnf install -y libX11-devel
+
+	# FreeBSD
+	pkg install xorg-libraries
+
 If the clipboard package is in an environment without a frame buffer,
-such as a cloud server, it may also be necessary to install xvfb:
-
-	apt install -y xvfb
-
-and initialize a virtual frame buffer:
+such as a cloud server, it may also be necessary to install xvfb and
+initialize a virtual frame buffer:
 
 	Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
 	export DISPLAY=:99.0
@@ -110,12 +114,28 @@ Then this package should be ready to use.
 
 func initialize() error {
 	var err error
-	libX11, err = purego.Dlopen("libX11.so.6", purego.RTLD_LAZY|purego.RTLD_GLOBAL)
-	if err != nil {
-		libX11, err = purego.Dlopen("libX11.so", purego.RTLD_LAZY|purego.RTLD_GLOBAL)
-		if err != nil {
-			return fmt.Errorf(helpmsg, ErrUnavailable)
+	
+	// Try common library paths for libX11
+	// Linux systems: libX11.so.6, libX11.so
+	// FreeBSD often has X11 in /usr/local/lib or /usr/X11R6/lib
+	libPaths := []string{
+		"libX11.so.6",           // versioned library (Linux, some BSD)
+		"libX11.so",             // generic library (Linux, BSD)
+		"/usr/local/lib/libX11.so.6",  // FreeBSD, OpenBSD
+		"/usr/local/lib/libX11.so",
+		"/usr/X11R6/lib/libX11.so.6",  // Older BSD systems
+		"/usr/X11R6/lib/libX11.so",
+	}
+	
+	for _, path := range libPaths {
+		libX11, err = purego.Dlopen(path, purego.RTLD_LAZY|purego.RTLD_GLOBAL)
+		if err == nil {
+			break
 		}
+	}
+	
+	if err != nil {
+		return fmt.Errorf(helpmsg, ErrUnavailable)
 	}
 
 	// Load all X11 functions

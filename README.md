@@ -139,6 +139,7 @@ Use the pre-defined constants:
 | Linux (X11)     | ✅ Complete | X11 via purego (requires libX11) |
 | Linux (Wayland) | 🚧 Planned  | Not yet implemented              |
 | Windows         | ✅ Complete | Win32 API via syscall            |
+| FreeBSD         | ✅ Complete | X11 via purego (requires libX11) |
 
 ### Linux Requirements
 
@@ -159,12 +160,36 @@ export DISPLAY=:99.0
 
 **Wayland (not yet supported):** Wayland clipboard support is planned but not yet implemented. If you're using Wayland, you'll need XWayland compatibility layer with X11 libraries installed for the clipboard to work.
 
+### FreeBSD Requirements
+
+**X11 (supported):** You need libX11 installed:
+
+```bash
+# FreeBSD
+sudo pkg install xorg-libraries
+
+# For headless environments
+sudo pkg install xorg-vfbserver
+Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
+export DISPLAY=:99.0
+```
+
+**Building on FreeBSD:** When building with `CGO_ENABLED=0` (the default for this library), you need to add special gcflags:
+
+```bash
+go build -gcflags="github.com/ebitengine/purego/internal/fakecgo=-std" ./...
+go test -gcflags="github.com/ebitengine/purego/internal/fakecgo=-std" ./...
+```
+
+**Note:** FreeBSD typically installs X11 libraries to `/usr/local/lib` or `/usr/X11R6/lib`. The library will automatically search these common FreeBSD locations.
+
 ## How It Works
 
 This library uses different approaches per platform:
 
 - **macOS**: Calls Objective-C runtime and AppKit (NSPasteboard) using purego/objc
 - **Linux (X11)**: Dynamically loads libX11.so and calls X11 clipboard functions via purego
+- **FreeBSD**: Same X11 implementation as Linux, with automatic detection of FreeBSD-specific library paths
 - **Linux (Wayland)**: Not yet implemented - planned for future release
 - **Windows**: Uses Win32 clipboard API (user32.dll, kernel32.dll) via Go's syscall package
 
