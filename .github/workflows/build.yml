@@ -59,9 +59,6 @@ jobs:
           - name: freebsd
             version: '14.2'
             architecture: x86-64
-          - name: openbsd
-            version: '7.6'
-            architecture: x86-64
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -75,15 +72,11 @@ jobs:
           architecture: ${{ matrix.os.architecture }}
           run: |
             # Install dependencies
-            if [ "${{ matrix.os.name }}" = "freebsd" ]; then
-              sudo pkg install -y go xorg-libraries xvfb-run
-            elif [ "${{ matrix.os.name }}" = "openbsd" ]; then
-              sudo pkg_add go xorg-libraries
-            fi
+            sudo pkg install -y go xorg-libraries xvfb-run
             
-            # Set up environment
+            # Set up environment - NO CGO
             export GO111MODULE=on
-            export CGO_ENABLED=1
+            export CGO_ENABLED=0
             
             # Download dependencies
             go mod download
@@ -92,17 +85,4 @@ jobs:
             go build -v ./...
             
             # Run tests with virtual display
-            if [ "${{ matrix.os.name }}" = "freebsd" ]; then
-              xvfb-run -a go test -v ./...
-            else
-              # OpenBSD - try with Xvfb if available, otherwise just build test
-              if command -v Xvfb >/dev/null 2>&1; then
-                Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
-                export DISPLAY=:99.0
-                sleep 2
-                go test -v ./...
-              else
-                # Just verify it compiles
-                go test -c ./...
-              fi
-            fi
+            xvfb-run -a go test -v ./...

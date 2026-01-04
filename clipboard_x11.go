@@ -1,7 +1,7 @@
 // Copyright 2025 Ayman Bagabas
 // SPDX-License-Identifier: MIT
 
-//go:build (linux || freebsd || openbsd || netbsd || dragonfly) && !android
+//go:build (linux || freebsd) && !android
 
 package nativeclipboard
 
@@ -102,12 +102,6 @@ will not work properly. Install the following dependency may help:
 	# FreeBSD
 	pkg install xorg-libraries
 
-	# OpenBSD
-	pkg_add libX11
-
-	# NetBSD
-	pkgin install libX11
-
 If the clipboard package is in an environment without a frame buffer,
 such as a cloud server, it may also be necessary to install xvfb and
 initialize a virtual frame buffer:
@@ -123,7 +117,7 @@ func initialize() error {
 	
 	// Try common library paths for libX11
 	// Linux systems: libX11.so.6, libX11.so
-	// BSD systems often have X11 in /usr/local/lib or /usr/X11R6/lib
+	// FreeBSD often has X11 in /usr/local/lib or /usr/X11R6/lib
 	libPaths := []string{
 		"libX11.so.6",           // versioned library (Linux, some BSD)
 		"libX11.so",             // generic library (Linux, BSD)

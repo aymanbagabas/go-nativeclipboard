@@ -10,7 +10,7 @@ This file documents everything an AI agent needs to know to work effectively in 
 - **Module**: `github.com/aymanbagabas/go-nativeclipboard`
 - **Key Dependencies**: 
   - `github.com/ebitengine/purego` - For calling native APIs without cgo
-- **Status**: macOS, Linux, BSD, and Windows implementations complete
+- **Status**: macOS, Linux, FreeBSD, and Windows implementations complete
 
 ## Project Structure
 
@@ -18,7 +18,7 @@ This file documents everything an AI agent needs to know to work effectively in 
 .
 ├── clipboard.go          # Main API and public interfaces
 ├── clipboard_darwin.go   # macOS implementation (NSPasteboard via purego)
-├── clipboard_x11.go      # X11 implementation for Linux and BSD (via purego)
+├── clipboard_x11.go      # X11 implementation for Linux and FreeBSD (via purego)
 ├── clipboard_windows.go  # Windows implementation (Win32 API via syscall)
 ├── clipboard_test.go     # Platform-agnostic tests
 ├── doc.go               # Package documentation for pkg.go.dev
@@ -101,18 +101,20 @@ All methods return errors. The package initializes automatically via `func init(
 Platform-specific files use build constraints:
 ```go
 //go:build darwin && !ios
-//go:build (linux || freebsd || openbsd || netbsd || dragonfly) && !android
+//go:build (linux || freebsd) && !android
 //go:build windows
 ```
 
-### X11 Implementation (Linux and BSD - Complete)
+### X11 Implementation (Linux and FreeBSD - Complete)
 
 Uses purego to call X11 library functions directly:
+
+**Note**: Only FreeBSD is supported among BSD systems, as purego officially supports FreeBSD only.
 
 1. **Dynamic library loading**:
    - Dynamically loads libX11.so using `purego.Dlopen`
    - Searches common paths: libX11.so.6, libX11.so
-   - BSD-specific paths: /usr/local/lib, /usr/X11R6/lib
+   - FreeBSD-specific paths: /usr/local/lib, /usr/X11R6/lib
    
 2. **X11 API**:
    - `XOpenDisplay` - Connect to X server
@@ -130,7 +132,7 @@ Uses purego to call X11 library functions directly:
    - libX11 must be installed
    - X11 display must be available (DISPLAY environment variable)
    - For headless: use Xvfb virtual framebuffer
-   - BSD: CGO_ENABLED=1 required due to purego requirements
+   - **CGO_ENABLED=0** - No cgo required (pure Go)
 
 5. **Thread safety**:
    - Use `runtime.LockOSThread()` for thread-sensitive operations
@@ -269,20 +271,17 @@ case <-time.After(2 * time.Second):
 
 **Testing**: Fully tested and working
 
-### Linux and BSD (Complete)
+### Linux and FreeBSD (Complete)
 
 **Implementation**: Unified X11 implementation via purego in `clipboard_x11.go`
 
 **Supported systems**:
 - Linux (all distributions with X11)
-- FreeBSD
-- OpenBSD
-- NetBSD
-- DragonFly BSD
+- FreeBSD (only BSD officially supported by purego)
 
 **Approach**:
 - Dynamically loads libX11.so using `purego.Dlopen`
-- Searches multiple library paths (Linux and BSD-specific)
+- Searches multiple library paths (Linux and FreeBSD-specific)
 - Calls X11 clipboard functions directly
 - Supports CLIPBOARD selection (not PRIMARY)
 - Handles UTF8_STRING and image/png types
@@ -295,7 +294,7 @@ case <-time.After(2 * time.Second):
   - NetBSD: `pkgin install libX11`
 - X11 display must be available (DISPLAY environment variable)
 - For headless: use Xvfb virtual framebuffer
-- BSD: CGO_ENABLED=1 required (purego requirement)
+- **CGO_ENABLED=0** - No cgo required (pure Go)
 
 **Key X11 functions used**:
 - `XOpenDisplay` - Connect to X server
