@@ -81,11 +81,11 @@ jobs:
             # Download dependencies
             go mod download
             
-            # Build
-            go build -v ./...
+            # Build with required FreeBSD flags for purego fakecgo
+            go build -v -gcflags="github.com/ebitengine/purego/internal/fakecgo=-std" ./...
             
             # Run tests with virtual display
             Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
             export DISPLAY=:99.0
             sleep 2
-            go test -v ./...
+            go test -v -gcflags="github.com/ebitengine/purego/internal/fakecgo=-std" ./...
