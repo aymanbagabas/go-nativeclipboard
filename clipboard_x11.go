@@ -1,7 +1,7 @@
 // Copyright 2025 Ayman Bagabas
 // SPDX-License-Identifier: MIT
 
-//go:build (freebsd || openbsd || netbsd || dragonfly) && !android
+//go:build (linux || freebsd || openbsd || netbsd || dragonfly) && !android
 
 package nativeclipboard
 
@@ -93,6 +93,12 @@ var (
 var helpmsg = `%w: Failed to initialize the X11 display, and the clipboard package
 will not work properly. Install the following dependency may help:
 
+	# Debian/Ubuntu
+	apt install -y libx11-dev
+
+	# Fedora/RHEL
+	dnf install -y libX11-devel
+
 	# FreeBSD
 	pkg install xorg-libraries
 
@@ -115,14 +121,15 @@ Then this package should be ready to use.
 func initialize() error {
 	var err error
 	
-	// Try common BSD library paths for libX11
-	// BSD systems often have X11 libraries in /usr/local/lib or /usr/X11R6/lib
+	// Try common library paths for libX11
+	// Linux systems: libX11.so.6, libX11.so
+	// BSD systems often have X11 in /usr/local/lib or /usr/X11R6/lib
 	libPaths := []string{
-		"libX11.so.6",           // versioned library
-		"libX11.so",             // generic library
-		"/usr/local/lib/libX11.so.6",
+		"libX11.so.6",           // versioned library (Linux, some BSD)
+		"libX11.so",             // generic library (Linux, BSD)
+		"/usr/local/lib/libX11.so.6",  // FreeBSD, OpenBSD
 		"/usr/local/lib/libX11.so",
-		"/usr/X11R6/lib/libX11.so.6",
+		"/usr/X11R6/lib/libX11.so.6",  // Older BSD systems
 		"/usr/X11R6/lib/libX11.so",
 	}
 	

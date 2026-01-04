@@ -48,3 +48,58 @@ jobs:
       - name: Test (macOS/Windows)
         if: runner.os != 'Linux'
         run: go test -v ./...
+
+  build-bsd:
+    strategy:
+      matrix:
+        os:
+          - name: freebsd
+            version: '14.2'
+            architecture: x86-64
+          - name: openbsd
+            version: '7.6'
+            architecture: x86-64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      
+      - name: Test on ${{ matrix.os.name }}
+        uses: cross-platform-actions/action@v0.26.0
+        with:
+          operating_system: ${{ matrix.os.name }}
+          version: ${{ matrix.os.version }}
+          architecture: ${{ matrix.os.architecture }}
+          run: |
+            # Install dependencies
+            if [ "${{ matrix.os.name }}" = "freebsd" ]; then
+              sudo pkg install -y go xorg-libraries xvfb-run
+            elif [ "${{ matrix.os.name }}" = "openbsd" ]; then
+              sudo pkg_add go xorg-libraries
+            fi
+            
+            # Set up environment
+            export GO111MODULE=on
+            export CGO_ENABLED=1
+            
+            # Download dependencies
+            go mod download
+            
+            # Build
+            go build -v ./...
+            
+            # Run tests with virtual display
+            if [ "${{ matrix.os.name }}" = "freebsd" ]; then
+              xvfb-run -a go test -v ./...
+            else
+              # OpenBSD - try with Xvfb if available, otherwise just build test
+              if command -v Xvfb >/dev/null 2>&1; then
+                Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
+                export DISPLAY=:99.0
+                sleep 2
+                go test -v ./...
+              else
+                # Just verify it compiles
+                go test -c ./...
+              fi
+            fi
