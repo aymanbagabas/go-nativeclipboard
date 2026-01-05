@@ -140,6 +140,9 @@ Use the pre-defined constants:
 | Linux (Wayland) | 🚧 Planned  | Not yet implemented              |
 | Windows         | ✅ Complete | Win32 API via syscall            |
 | FreeBSD         | ✅ Complete | X11 via purego (requires libX11) |
+| Other platforms | ❌ Unsupported | Returns `ErrUnavailable` error  |
+
+**Note:** On unsupported platforms (OpenBSD, NetBSD, Solaris, iOS, Android, etc.), the package compiles successfully but all clipboard operations return `ErrUnavailable`.
 
 ### Linux Requirements
 
@@ -192,6 +195,7 @@ This library uses different approaches per platform:
 - **FreeBSD**: Same X11 implementation as Linux, with automatic detection of FreeBSD-specific library paths
 - **Linux (Wayland)**: Not yet implemented - planned for future release
 - **Windows**: Uses Win32 clipboard API (user32.dll, kernel32.dll) via Go's syscall package
+- **Other platforms**: Stub implementation that returns `ErrUnavailable` for all operations
 
 All approaches avoid cgo entirely, resulting in faster builds and easier cross-compilation.
 
