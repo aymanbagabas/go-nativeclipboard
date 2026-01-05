@@ -1,7 +1,7 @@
 // Copyright 2025 Ayman Bagabas
 // SPDX-License-Identifier: MIT
 
-//go:build darwin
+//go:build darwin && !ios
 
 package nativeclipboard
 

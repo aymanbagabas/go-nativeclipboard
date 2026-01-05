@@ -1,7 +1,7 @@
 // Copyright 2025 Ayman Bagabas
 // SPDX-License-Identifier: MIT
 
-//go:build linux || freebsd
+//go:build (linux || freebsd) && !android
 
 package nativeclipboard
 

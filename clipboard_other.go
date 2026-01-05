@@ -1,7 +1,7 @@
 // Copyright 2025 Ayman Bagabas
 // SPDX-License-Identifier: MIT
 
-//go:build !darwin && !windows && !linux && !freebsd
+//go:build !(darwin && !ios) && !windows && !(linux && !android) && !(freebsd && !android)
 
 package nativeclipboard
 
@@ -23,6 +23,9 @@ func write(t Format, buf []byte) (<-chan struct{}, error) {
 
 func watch(ctx context.Context, t Format) <-chan []byte {
 	ch := make(chan []byte)
-	close(ch)
+	go func() {
+		<-ctx.Done()
+		close(ch)
+	}()
 	return ch
 }
