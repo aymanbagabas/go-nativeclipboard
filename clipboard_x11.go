@@ -8,6 +8,7 @@ package nativeclipboard
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -459,34 +460,13 @@ var (
 
 // Wayland global state
 type waylandClipboard struct {
-	display           wl_display
-	registry          wl_registry
-	compositor        wl_compositor
-	seat              wl_seat
-	dataDeviceManager wl_data_device_manager
-	dataDevice        wl_data_device
-	serialNumber      uint32
-	initialized       bool
-	useExternalTools  bool  // If true, use wl-copy/wl-paste instead of direct implementation
+	initialized      bool
+	useExternalTools bool // Always true when initialized - uses wl-copy/wl-paste
 }
 
 var waylandState waylandClipboard
 
-var waylandHelpmsg = `Failed to initialize Wayland clipboard. Install libwayland-client:
-
-	# Debian/Ubuntu
-	apt install -y libwayland-client0
-
-	# Fedora/RHEL
-	dnf install -y wayland-devel
-
-	# Arch Linux
-	pacman -S wayland
-
-Make sure WAYLAND_DISPLAY environment variable is set.
-`
-
-// Wayland protocol opcodes
+// Wayland protocol opcodes (unused - kept for reference)
 const (
 	WL_REGISTRY_BIND                          = 0
 	WL_DATA_DEVICE_MANAGER_CREATE_DATA_SOURCE = 0
@@ -536,73 +516,18 @@ func initializeWayland() error {
 		}
 	}
 
-	// If external tools aren't available, try direct libwayland approach
-	// This is more complex and requires proper callback handling
-	
-	// Try to load libwayland-client.so
-	var err error
-	libPaths := []string{
-		"libwayland-client.so.0",
-		"libwayland-client.so",
-		"/usr/lib/libwayland-client.so.0",
-		"/usr/lib/x86_64-linux-gnu/libwayland-client.so.0",
-		"/usr/lib64/libwayland-client.so.0",
-		"/usr/lib/aarch64-linux-gnu/libwayland-client.so.0",
-	}
-
-	for _, path := range libPaths {
-		libwayland, err = purego.Dlopen(path, purego.RTLD_NOW|purego.RTLD_GLOBAL)
-		if err == nil {
-			break
-		}
-	}
-
-	if err != nil {
-		return fmt.Errorf("%s\nError: %w", waylandHelpmsg, err)
-	}
-
-	// Load Wayland functions
-	purego.RegisterLibFunc(&wl_display_connect, libwayland, "wl_display_connect")
-	purego.RegisterLibFunc(&wl_display_disconnect, libwayland, "wl_display_disconnect")
-	purego.RegisterLibFunc(&wl_display_get_registry, libwayland, "wl_display_get_registry")
-	purego.RegisterLibFunc(&wl_display_roundtrip, libwayland, "wl_display_roundtrip")
-	purego.RegisterLibFunc(&wl_display_dispatch, libwayland, "wl_display_dispatch")
-	purego.RegisterLibFunc(&wl_display_dispatch_pending, libwayland, "wl_display_dispatch_pending")
-	purego.RegisterLibFunc(&wl_display_flush, libwayland, "wl_display_flush")
-	purego.RegisterLibFunc(&wl_display_sync, libwayland, "wl_display_sync")
-
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-
-	// Connect to Wayland display
-	waylandState.display = wl_display_connect(nil)
-	if waylandState.display == 0 {
-		return fmt.Errorf("failed to connect to Wayland display")
-	}
-
-	// Test the connection works
-	if wl_display_roundtrip(waylandState.display) < 0 {
-		wl_display_disconnect(waylandState.display)
-		return fmt.Errorf("failed to communicate with Wayland display")
-	}
-
-	// Note: Full implementation of Wayland clipboard requires:
-	// 1. Implementing C callbacks using purego.NewCallback for registry events
-	// 2. Handling the wl_data_device_manager protocol
-	// 3. Managing file descriptor-based data transfer
-	// 
-	// This is complex with purego due to:
-	// - Callback trampolines need careful lifetime management
-	// - Event loops require integration with Wayland's fd-based dispatch
-	// - Interface matching needs proper struct layouts
+	// wl-clipboard tools not found
+	// Note: A direct libwayland implementation would require:
+	// - Implementing C callbacks using purego.NewCallback for registry events
+	// - Handling the wl_data_device_manager protocol with complex event loops
+	// - Managing file descriptor-based data transfer
 	//
-	// For now, we require wl-copy/wl-paste tools for full functionality
-	// Clean up and return error to fall back to X11
-
-	wl_display_disconnect(waylandState.display)
-	waylandState.display = 0
-
-	return fmt.Errorf("Wayland clipboard requires wl-copy/wl-paste tools (install wl-clipboard package) - falling back to X11")
+	// This is impractical with purego due to callback lifetime management
+	// and event loop integration complexity. The wl-clipboard tools are
+	// the standard, reliable solution used by wl-clipboard (C) and
+	// wl-clipboard-rs (Rust) projects.
+	
+	return fmt.Errorf("Wayland clipboard requires wl-clipboard package (install with: apt install wl-clipboard) - falling back to X11")
 }
 
 // Wayland clipboard read implementation using wl-paste
@@ -626,12 +551,11 @@ func readWayland(t Format) ([]byte, error) {
 	
 	output, err := cmd.Output()
 	if err != nil {
-		// Check if it's just that clipboard is empty
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			if exitErr.ExitCode() == 1 {
-				// Clipboard is empty or doesn't have this MIME type
-				return nil, nil
-			}
+		// Check if clipboard is empty or doesn't have requested MIME type
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			// Clipboard is empty or doesn't have this MIME type
+			return nil, nil
 		}
 		return nil, fmt.Errorf("wl-paste failed: %w", err)
 	}
@@ -682,8 +606,10 @@ func writeWayland(t Format, buf []byte) (<-chan struct{}, error) {
 	}
 
 	// Return a closed channel to indicate write completion
-	// Note: This channel does NOT signal when the clipboard is overwritten by another app.
-	// To monitor clipboard changes, use the Watch() function instead.
+	// IMPORTANT API SEMANTICS: This channel signals that the write operation completed successfully,
+	// NOT that the clipboard was overwritten by another application. The channel closes immediately
+	// after the write completes. To monitor when the clipboard content changes (i.e., another app
+	// overwrites our data), use the Watch() function which polls for content changes.
 	changed := make(chan struct{})
 	close(changed)
 
