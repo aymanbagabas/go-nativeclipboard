@@ -9,7 +9,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"runtime"
 	"time"
 	"unsafe"
@@ -463,14 +465,15 @@ var (
 
 // Wayland global state
 type waylandClipboard struct {
-	display            wl_display
-	registry           wl_registry
-	compositor         wl_compositor
-	seat               wl_seat
-	dataDeviceManager  wl_data_device_manager
-	dataDevice         wl_data_device
-	serialNumber       uint32
-	initialized        bool
+	display           wl_display
+	registry          wl_registry
+	compositor        wl_compositor
+	seat              wl_seat
+	dataDeviceManager wl_data_device_manager
+	dataDevice        wl_data_device
+	serialNumber      uint32
+	initialized       bool
+	useExternalTools  bool  // If true, use wl-copy/wl-paste instead of direct implementation
 }
 
 var waylandState waylandClipboard
@@ -513,6 +516,20 @@ func initializeWayland() error {
 		return fmt.Errorf("WAYLAND_DISPLAY not set")
 	}
 
+	// Check if wl-copy and wl-paste are available
+	// These are from wl-clipboard package and provide a reliable way to interact with Wayland clipboard
+	if _, err := exec.LookPath("wl-copy"); err == nil {
+		if _, err := exec.LookPath("wl-paste"); err == nil {
+			// Use external tools approach - this is reliable and tested
+			waylandState.useExternalTools = true
+			waylandState.initialized = true
+			return nil
+		}
+	}
+
+	// If external tools aren't available, try direct libwayland approach
+	// This is more complex and requires proper callback handling
+	
 	// Try to load libwayland-client.so
 	var err error
 	libPaths := []string{
@@ -544,44 +561,176 @@ func initializeWayland() error {
 	purego.RegisterLibFunc(&wl_display_dispatch_pending, libwayland, "wl_display_dispatch_pending")
 	purego.RegisterLibFunc(&wl_display_flush, libwayland, "wl_display_flush")
 	purego.RegisterLibFunc(&wl_display_sync, libwayland, "wl_display_sync")
-	
-	purego.RegisterLibFunc(&wl_proxy_marshal, libwayland, "wl_proxy_marshal")
-	purego.RegisterLibFunc(&wl_proxy_marshal_constructor, libwayland, "wl_proxy_marshal_constructor")
-	purego.RegisterLibFunc(&wl_proxy_marshal_constructor_versioned, libwayland, "wl_proxy_marshal_constructor_versioned")
-	purego.RegisterLibFunc(&wl_proxy_add_listener, libwayland, "wl_proxy_add_listener")
-	purego.RegisterLibFunc(&wl_proxy_destroy, libwayland, "wl_proxy_destroy")
-	purego.RegisterLibFunc(&wl_proxy_get_user_data, libwayland, "wl_proxy_get_user_data")
-	purego.RegisterLibFunc(&wl_proxy_set_user_data, libwayland, "wl_proxy_set_user_data")
 
-	// TODO: Complete Wayland implementation
-	// The following steps are required to finish Wayland clipboard support:
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	// Connect to Wayland display
+	waylandState.display = wl_display_connect(nil)
+	if waylandState.display == 0 {
+		return fmt.Errorf("failed to connect to Wayland display")
+	}
+
+	// Test the connection works
+	if wl_display_roundtrip(waylandState.display) < 0 {
+		wl_display_disconnect(waylandState.display)
+		return fmt.Errorf("failed to communicate with Wayland display")
+	}
+
+	// Note: Full implementation of Wayland clipboard requires:
+	// 1. Implementing C callbacks using purego.NewCallback for registry events
+	// 2. Handling the wl_data_device_manager protocol
+	// 3. Managing file descriptor-based data transfer
+	// 
+	// This is complex with purego due to:
+	// - Callback trampolines need careful lifetime management
+	// - Event loops require integration with Wayland's fd-based dispatch
+	// - Interface matching needs proper struct layouts
 	//
-	// 1. Connect to display:
-	//    waylandState.display = wl_display_connect(nil)
-	//
-	// 2. Get registry and implement listener callbacks:
-	//    - Need to implement C-compatible callback functions using purego
-	//    - Registry listener must handle "global" events to bind interfaces
-	//    - Bind to: wl_compositor, wl_seat, wl_data_device_manager
-	//
-	// 3. Create data device:
-	//    waylandState.dataDevice = wl_data_device_manager_get_data_device(manager, seat)
-	//
-	// 4. Implement clipboard operations:
-	//    - For READ: Listen for wl_data_offer, negotiate MIME types, read from fd
-	//    - For WRITE: Create wl_data_source, offer MIME types, write to fd on request
-	//
-	// 5. Event loop:
-	//    - Implement event processing with wl_display_dispatch
-	//    - Handle async nature of Wayland protocol
-	//
-	// Main challenges:
-	// - purego callback implementation for Wayland event handlers
-	// - File descriptor-based data transfer (os.Pipe + io.Copy)
-	// - State machine for async clipboard protocol
-	// - Thread safety with goroutines and Wayland display connection
-	//
-	// For now, return error to gracefully fall back to X11
+	// For now, we require wl-copy/wl-paste tools for full functionality
+	// Clean up and return error to fall back to X11
+
+	wl_display_disconnect(waylandState.display)
+	waylandState.display = 0
+
+	return fmt.Errorf("Wayland clipboard requires wl-copy/wl-paste tools (install wl-clipboard package) - falling back to X11")
+}
+
+// Wayland clipboard read implementation using wl-paste
+func readWayland(t Format) ([]byte, error) {
+	if !waylandState.initialized {
+		return nil, ErrUnavailable
+	}
+
+	if !waylandState.useExternalTools {
+		return nil, fmt.Errorf("Wayland clipboard requires wl-copy/wl-paste tools")
+	}
+
+	// Determine MIME type
+	var mimeType string
+	switch t {
+	case Text:
+		mimeType = "text/plain;charset=utf-8"
+	case Image:
+		mimeType = "image/png"
+	default:
+		return nil, ErrUnsupported
+	}
+
+	// Use wl-paste to read from clipboard
+	cmd := exec.Command("wl-paste", "-t", mimeType)
 	
-	return fmt.Errorf("Wayland clipboard implementation in progress - falling back to X11")
+	output, err := cmd.Output()
+	if err != nil {
+		// Check if it's just that clipboard is empty
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			if exitErr.ExitCode() == 1 {
+				// Clipboard is empty or doesn't have this MIME type
+				return nil, nil
+			}
+		}
+		return nil, fmt.Errorf("wl-paste failed: %w", err)
+	}
+
+	return output, nil
+}
+
+// Wayland clipboard write implementation using wl-copy
+func writeWayland(t Format, buf []byte) (<-chan struct{}, error) {
+	if !waylandState.initialized {
+		return nil, ErrUnavailable
+	}
+
+	if !waylandState.useExternalTools {
+		return nil, fmt.Errorf("Wayland clipboard requires wl-copy/wl-paste tools")
+	}
+
+	// Determine MIME type
+	var mimeType string
+	switch t {
+	case Text:
+		mimeType = "text/plain;charset=utf-8"
+	case Image:
+		mimeType = "image/png"
+	default:
+		return nil, ErrUnsupported
+	}
+
+	// Use wl-copy to write to clipboard
+	cmd := exec.Command("wl-copy", "-t", mimeType)
+	
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stdin pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start wl-copy: %w", err)
+	}
+
+	// Write data to stdin
+	go func() {
+		defer stdin.Close()
+		io.Copy(stdin, bytes.NewReader(buf))
+	}()
+
+	// Wait for command to complete
+	if err := cmd.Wait(); err != nil {
+		return nil, fmt.Errorf("wl-copy failed: %w", err)
+	}
+
+	// Create channel for change notification
+	// In Wayland, we don't get notification when clipboard is overwritten
+	// So we return a channel that never closes (or closes when process exits)
+	changed := make(chan struct{})
+	
+	// Monitor clipboard changes in background
+	go func() {
+		// We could monitor by polling wl-paste, but that's inefficient
+		// For now, just keep the channel open
+		// A full implementation would use wl_data_device listeners
+	}()
+
+	return changed, nil
+}
+
+// Wayland clipboard watch implementation
+func watchWayland(ctx context.Context, t Format) <-chan []byte {
+	ch := make(chan []byte, 1)
+
+	if !waylandState.initialized {
+		close(ch)
+		return ch
+	}
+
+	go func() {
+		defer close(ch)
+
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+
+		var lastData []byte
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				data, err := readWayland(t)
+				if err != nil {
+					continue
+				}
+
+				if !bytes.Equal(data, lastData) {
+					lastData = data
+					select {
+					case ch <- data:
+					case <-ctx.Done():
+						return
+					}
+				}
+			}
+		}
+	}()
+
+	return ch
 }

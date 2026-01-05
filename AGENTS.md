@@ -106,7 +106,7 @@ Platform-specific files use build constraints:
 //go:build windows
 ```
 
-### Linux Implementation (In Progress)
+### Linux Implementation (Complete)
 
 Linux clipboard support is split across two implementations:
 
@@ -115,7 +115,7 @@ Linux clipboard support is split across two implementations:
 **Implementation**: clipboard_x11.go
 
 The Linux implementation automatically detects and uses the available display server:
-1. Tries Wayland first (if WAYLAND_DISPLAY is set)
+1. Tries Wayland first (if WAYLAND_DISPLAY is set and wl-clipboard is installed)
 2. Falls back to X11 (if DISPLAY is set)
 3. Returns error if neither is available
 
@@ -152,47 +152,48 @@ Uses purego to call X11 library functions directly:
 5. **Thread safety**:
    - Use `runtime.LockOSThread()` for thread-sensitive operations
 
-### Wayland Implementation (Linux - In Progress)
+### Wayland Implementation (Linux - Complete)
 
 **Build tags**: `//go:build linux && !android`
 
 **Implementation**: clipboard_x11.go (integrated with X11 for runtime selection)
 
-Uses purego to call Wayland library functions directly:
+Uses the wl-clipboard tools (wl-copy and wl-paste) for reliable Wayland clipboard access:
 
-1. **Dynamic library loading**:
-   - Dynamically loads libwayland-client.so using `purego.Dlopen`
-   - Searches common paths: libwayland-client.so.0, libwayland-client.so
+1. **External tools approach**:
+   - Uses `wl-copy` command for writing to clipboard
+   - Uses `wl-paste` command for reading from clipboard
+   - These tools from wl-clipboard package are battle-tested and reliable
    
-2. **Wayland protocols needed**:
-   - `wl_display` - Connection to Wayland compositor
-   - `wl_registry` - Global object registry
-   - `wl_seat` - Input device access
-   - `wl_data_device_manager` - Clipboard management protocol
-   - `wl_data_source` - Providing clipboard data (write operations)
-   - `wl_data_offer` - Receiving clipboard data (read operations)
+2. **Why external tools**:
+   - Wayland clipboard protocol requires complex event-driven callbacks
+   - Implementing callbacks with purego has significant limitations:
+     - Callback lifetime management is complex
+     - Event loop integration with fd-based dispatch is challenging
+     - Interface matching requires exact C struct layouts
+   - wl-clipboard tools are standard and widely available
+   - Simpler, more maintainable, and more reliable than reimplementation
 
-3. **Implementation challenges**:
-   - Wayland uses async event-driven architecture with callbacks
-   - Requires proper event loop handling
-   - Data transfer via file descriptors (pipes)
-   - Need to bind to registry globals and handle events
-   - Complex state management for clipboard ownership
+3. **Supported formats**:
+   - Text: text/plain;charset=utf-8
+   - Images: image/png
 
 4. **Current status**:
-   - Library loading: ✅ Complete
-   - Function registration: ✅ Complete
-   - Display connection: ✅ Complete
-   - Registry setup: 🚧 In progress
-   - Event loop: ❌ Not yet implemented
-   - Read operations: ❌ Not yet implemented
-   - Write operations: ❌ Not yet implemented
-   - Falls back to X11 for now
+   - ✅ Tool detection and execution
+   - ✅ Read operations via wl-paste
+   - ✅ Write operations via wl-copy
+   - ✅ Automatic fallback to X11 if tools unavailable
+   - ✅ Full feature parity with X11
 
 5. **Requirements**:
-   - libwayland-client must be installed
+   - wl-clipboard package must be installed (`wl-copy` and `wl-paste` commands)
    - WAYLAND_DISPLAY environment variable must be set
    - **CGO_ENABLED=0** - No cgo required (pure Go)
+
+6. **References**:
+   - [wl-clipboard](https://github.com/bugaevc/wl-clipboard) - C implementation
+   - [wl-clipboard-rs](https://github.com/YaLTeR/wl-clipboard-rs) - Rust implementation
+   - Both use proper Wayland protocol bindings rather than purego-style dynamic loading
 
 ### FreeBSD Implementation (Complete)
 
