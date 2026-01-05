@@ -9,7 +9,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"runtime"
 	"time"
 	"unsafe"
@@ -94,18 +93,14 @@ var (
 var helpmsg = `%w: Failed to initialize the X11 display, and the clipboard package
 will not work properly. Install the following dependency may help:
 
-	# Debian/Ubuntu
 	apt install -y libx11-dev
 
-	# Fedora/RHEL
-	dnf install -y libX11-devel
-
-	# FreeBSD
-	pkg install xorg-libraries
-
 If the clipboard package is in an environment without a frame buffer,
-such as a cloud server, it may also be necessary to install xvfb and
-initialize a virtual frame buffer:
+such as a cloud server, it may also be necessary to install xvfb:
+
+	apt install -y xvfb
+
+and initialize a virtual frame buffer:
 
 	Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
 	export DISPLAY=:99.0
@@ -113,36 +108,14 @@ initialize a virtual frame buffer:
 Then this package should be ready to use.
 `
 
-func initialize() error {
-	// Try Wayland first if WAYLAND_DISPLAY is set
-	if os.Getenv("WAYLAND_DISPLAY") != "" {
-		err := initializeWayland()
-		if err == nil {
-			useWayland = true
-			return nil
-		}
-		// Wayland failed, fall through to X11
-	}
-
-	// Try X11 as fallback or if DISPLAY is set
+func initializeX11() error {
 	var err error
-	
-	// Try common library paths for libX11
-	// Linux systems: libX11.so.6, libX11.so
-	libPaths := []string{
-		"libX11.so.6",           // versioned library (Linux)
-		"libX11.so",             // generic library (Linux)
-	}
-	
-	for _, path := range libPaths {
-		libX11, err = purego.Dlopen(path, purego.RTLD_LAZY|purego.RTLD_GLOBAL)
-		if err == nil {
-			break
-		}
-	}
-	
+	libX11, err = purego.Dlopen("libX11.so.6", purego.RTLD_LAZY|purego.RTLD_GLOBAL)
 	if err != nil {
-		return fmt.Errorf(helpmsg, ErrUnavailable)
+		libX11, err = purego.Dlopen("libX11.so", purego.RTLD_LAZY|purego.RTLD_GLOBAL)
+		if err != nil {
+			return fmt.Errorf(helpmsg, ErrUnavailable)
+		}
 	}
 
 	// Load all X11 functions
@@ -177,25 +150,7 @@ func initialize() error {
 	return nil
 }
 
-func read(t Format) ([]byte, error) {
-	// Check if Wayland is being used
-	if useWayland {
-		return readWayland(t)
-	}
 
-	// Use X11 implementation
-	var atomType string
-	switch t {
-	case Text:
-		atomType = "UTF8_STRING"
-	case Image:
-		atomType = "image/png"
-	default:
-		return nil, ErrUnsupported
-	}
-
-	return readX11(atomType)
-}
 
 func readX11(atomType string) ([]byte, error) {
 	runtime.LockOSThread()
@@ -270,23 +225,7 @@ func readX11(atomType string) ([]byte, error) {
 	return result, nil
 }
 
-func write(t Format, buf []byte) (<-chan struct{}, error) {
-	// Check if Wayland is being used
-	if useWayland {
-		return writeWayland(t, buf)
-	}
-
-	// Use X11 implementation
-	var atomType string
-	switch t {
-	case Text:
-		atomType = "UTF8_STRING"
-	case Image:
-		atomType = "image/png"
-	default:
-		return nil, ErrUnsupported
-	}
-
+func writeX11(atomType string, buf []byte) (<-chan struct{}, error) {
 	done := make(chan struct{}, 1)
 
 	go func() {
@@ -377,16 +316,10 @@ func write(t Format, buf []byte) (<-chan struct{}, error) {
 	return done, nil
 }
 
-func watch(ctx context.Context, t Format) <-chan []byte {
-	// Check if Wayland is being used
-	if useWayland {
-		return watchWayland(ctx, t)
-	}
-
-	// Use X11 implementation
+func watchX11(ctx context.Context, t Format) <-chan []byte {
 	recv := make(chan []byte, 1)
 	ticker := time.NewTicker(time.Second)
-	last, _ := read(t)
+	last, _ := readX11(mimeTypeForFormat(t))
 
 	go func() {
 		defer ticker.Stop()
@@ -409,177 +342,4 @@ func watch(ctx context.Context, t Format) <-chan []byte {
 	}()
 
 	return recv
-}
-
-// Wayland support
-// Implementation of Wayland clipboard using the wl_data_device_manager protocol via purego
-
-var useWayland = false
-
-// Wayland types
-type (
-	wl_display              uintptr
-	wl_registry             uintptr
-	wl_compositor           uintptr
-	wl_seat                 uintptr
-	wl_data_device_manager  uintptr
-	wl_data_device          uintptr
-	wl_data_source          uintptr
-	wl_data_offer           uintptr
-	wl_proxy                uintptr
-)
-
-// Wayland function pointers
-var (
-	libwayland uintptr
-
-	wl_display_connect          func(name *byte) wl_display
-	wl_display_disconnect       func(display wl_display)
-	wl_display_get_registry     func(display wl_display) wl_registry
-	wl_display_roundtrip        func(display wl_display) int32
-	wl_display_dispatch         func(display wl_display) int32
-	wl_display_dispatch_pending func(display wl_display) int32
-	wl_display_flush            func(display wl_display) int32
-	wl_display_get_fd           func(display wl_display) int32
-	wl_proxy_add_listener       func(proxy wl_proxy, implementation uintptr, data uintptr) int32
-	wl_proxy_destroy            func(proxy wl_proxy)
-	wl_proxy_marshal_flags      func(proxy wl_proxy, opcode uint32, iface uintptr, version uint32, flags uint32, args ...uintptr) wl_proxy
-)
-
-// Wayland global state
-type waylandClipboard struct {
-	display           wl_display
-	registry          wl_registry
-	compositor        wl_compositor
-	seat              wl_seat
-	dataDeviceManager wl_data_device_manager
-	dataDevice        wl_data_device
-	currentOffer      wl_data_offer
-	offerData         []byte
-	serial            uint32
-	initialized       bool
-}
-
-var waylandState waylandClipboard
-
-// MIME types for clipboard
-const (
-	mimeTypeTextPlainUtf8 = "text/plain;charset=utf-8"
-	mimeTypeImagePNG      = "image/png"
-)
-
-// getMimeType returns the MIME type string for a given clipboard Format
-func getMimeType(t Format) (string, error) {
-	switch t {
-	case Text:
-		return mimeTypeTextPlainUtf8, nil
-	case Image:
-		return mimeTypeImagePNG, nil
-	default:
-		return "", ErrUnsupported
-	}
-}
-
-// initializeWayland attempts to initialize Wayland clipboard support using purego
-func initializeWayland() error {
-	// Check if WAYLAND_DISPLAY is set
-	if os.Getenv("WAYLAND_DISPLAY") == "" {
-		return fmt.Errorf("WAYLAND_DISPLAY not set")
-	}
-
-	// Try to load libwayland-client.so
-	var err error
-	libPaths := []string{
-		"libwayland-client.so.0",
-		"libwayland-client.so",
-		"/usr/lib/libwayland-client.so.0",
-		"/usr/lib/x86_64-linux-gnu/libwayland-client.so.0",
-		"/usr/lib64/libwayland-client.so.0",
-		"/usr/lib/aarch64-linux-gnu/libwayland-client.so.0",
-	}
-
-	for _, path := range libPaths {
-		libwayland, err = purego.Dlopen(path, purego.RTLD_NOW|purego.RTLD_GLOBAL)
-		if err == nil {
-			break
-		}
-	}
-
-	if err != nil {
-		return fmt.Errorf("failed to load libwayland-client: %w", err)
-	}
-
-	// Load Wayland functions
-	purego.RegisterLibFunc(&wl_display_connect, libwayland, "wl_display_connect")
-	purego.RegisterLibFunc(&wl_display_disconnect, libwayland, "wl_display_disconnect")
-	purego.RegisterLibFunc(&wl_display_get_registry, libwayland, "wl_display_get_registry")
-	purego.RegisterLibFunc(&wl_display_roundtrip, libwayland, "wl_display_roundtrip")
-	purego.RegisterLibFunc(&wl_display_dispatch, libwayland, "wl_display_dispatch")
-	purego.RegisterLibFunc(&wl_display_dispatch_pending, libwayland, "wl_display_dispatch_pending")
-	purego.RegisterLibFunc(&wl_display_flush, libwayland, "wl_display_flush")
-	purego.RegisterLibFunc(&wl_display_get_fd, libwayland, "wl_display_get_fd")
-	purego.RegisterLibFunc(&wl_proxy_add_listener, libwayland, "wl_proxy_add_listener")
-	purego.RegisterLibFunc(&wl_proxy_destroy, libwayland, "wl_proxy_destroy")
-	purego.RegisterLibFunc(&wl_proxy_marshal_flags, libwayland, "wl_proxy_marshal_flags")
-
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-
-	// Connect to Wayland display
-	waylandState.display = wl_display_connect(nil)
-	if waylandState.display == 0 {
-		return fmt.Errorf("failed to connect to Wayland display")
-	}
-
-	// Get registry
-	waylandState.registry = wl_display_get_registry(waylandState.display)
-	if waylandState.registry == 0 {
-		wl_display_disconnect(waylandState.display)
-		return fmt.Errorf("failed to get Wayland registry")
-	}
-
-	// Set up registry listener to get globals
-	// This requires implementing callbacks with purego
-	// For now, return error - full implementation requires complex callback setup
-	
-	// Clean up
-	wl_display_disconnect(waylandState.display)
-	
-	return fmt.Errorf("Wayland purego implementation in progress - falling back to X11")
-}
-
-// readWayland reads clipboard data using Wayland protocol
-func readWayland(t Format) ([]byte, error) {
-	if !waylandState.initialized {
-		return nil, ErrUnavailable
-	}
-
-	// TODO: Implement Wayland read using wl_data_offer
-	return nil, fmt.Errorf("Wayland read not yet implemented")
-}
-
-// writeWayland writes clipboard data using Wayland protocol
-func writeWayland(t Format, buf []byte) (<-chan struct{}, error) {
-	if !waylandState.initialized {
-		return nil, ErrUnavailable
-	}
-
-	// TODO: Implement Wayland write using wl_data_source
-	changed := make(chan struct{})
-	close(changed)
-	return changed, fmt.Errorf("Wayland write not yet implemented")
-}
-
-// watchWayland monitors clipboard changes using Wayland protocol
-func watchWayland(ctx context.Context, t Format) <-chan []byte {
-	ch := make(chan []byte, 1)
-	
-	if !waylandState.initialized {
-		close(ch)
-		return ch
-	}
-
-	// TODO: Implement Wayland watch using wl_data_device listener
-	close(ch)
-	return ch
 }
