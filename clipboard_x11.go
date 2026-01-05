@@ -381,6 +381,16 @@ func write(t Format, buf []byte) (<-chan struct{}, error) {
 
 func watch(ctx context.Context, t Format) <-chan []byte {
 	recv := make(chan []byte, 1)
+	
+	// Check if Wayland is being used
+	if useWayland {
+		// Wayland implementation not yet complete
+		// Return empty channel that closes immediately
+		close(recv)
+		return recv
+	}
+
+	// Use X11 implementation
 	ticker := time.NewTicker(time.Second)
 	last, _ := read(t)
 
