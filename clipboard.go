@@ -19,6 +19,22 @@
 //	fmt.Println(string(data))
 //
 // The package supports text (UTF-8) and images (PNG).
+//
+// # Error Handling
+//
+// The package defines three error types:
+//
+//   - ErrUnsupportedPlatform: returned on platforms that don't support clipboard operations
+//     (e.g., iOS, Android, or other unsupported platforms)
+//   - ErrUnavailable: returned when the clipboard is temporarily unavailable on supported platforms
+//   - ErrUnsupported: returned when the requested format is not supported
+//
+// Use errors.Is() to check for specific error types:
+//
+//	data, err := nativeclipboard.Text.Read()
+//	if errors.Is(err, nativeclipboard.ErrUnsupportedPlatform) {
+//		// Handle unsupported platform
+//	}
 package nativeclipboard
 
 import (
@@ -32,6 +48,8 @@ var (
 	ErrUnavailable = errors.New("clipboard unavailable")
 	// ErrUnsupported indicates the requested format is not supported
 	ErrUnsupported = errors.New("unsupported format")
+	// ErrUnsupportedPlatform indicates the platform does not support clipboard operations
+	ErrUnsupportedPlatform = errors.New("unsupported platform")
 )
 
 // Format represents a clipboard data format.
