@@ -1,7 +1,7 @@
 // Copyright 2025 Ayman Bagabas
 // SPDX-License-Identifier: MIT
 
-//go:build linux && !android
+//go:build freebsd
 
 package nativeclipboard
 
@@ -9,7 +9,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"runtime"
 	"time"
 	"unsafe"
@@ -114,24 +113,18 @@ Then this package should be ready to use.
 `
 
 func initialize() error {
-	// Try Wayland first if WAYLAND_DISPLAY is set
-	if os.Getenv("WAYLAND_DISPLAY") != "" {
-		err := initializeWayland()
-		if err == nil {
-			useWayland = true
-			return nil
-		}
-		// Wayland failed, fall through to X11
-	}
-
-	// Try X11 as fallback or if DISPLAY is set
 	var err error
 	
 	// Try common library paths for libX11
 	// Linux systems: libX11.so.6, libX11.so
+	// FreeBSD often has X11 in /usr/local/lib or /usr/X11R6/lib
 	libPaths := []string{
-		"libX11.so.6",           // versioned library (Linux)
-		"libX11.so",             // generic library (Linux)
+		"libX11.so.6",           // versioned library (Linux, some BSD)
+		"libX11.so",             // generic library (Linux, BSD)
+		"/usr/local/lib/libX11.so.6",  // FreeBSD, OpenBSD
+		"/usr/local/lib/libX11.so",
+		"/usr/X11R6/lib/libX11.so.6",  // Older BSD systems
+		"/usr/X11R6/lib/libX11.so",
 	}
 	
 	for _, path := range libPaths {
@@ -391,23 +384,4 @@ func watch(ctx context.Context, t Format) <-chan []byte {
 	}()
 
 	return recv
-}
-
-// Wayland support
-// Note: Wayland clipboard implementation will be added here
-// For now, we only support X11 on Linux
-
-var useWayland = false
-
-// initializeWayland attempts to initialize Wayland clipboard support
-// This is a stub for future Wayland implementation
-func initializeWayland() error {
-	// Check if WAYLAND_DISPLAY is set
-	if os.Getenv("WAYLAND_DISPLAY") == "" {
-		return fmt.Errorf("WAYLAND_DISPLAY not set")
-	}
-
-	// TODO: Implement Wayland clipboard support
-	// For now, return error to fall back to X11
-	return fmt.Errorf("Wayland clipboard not yet implemented")
 }
