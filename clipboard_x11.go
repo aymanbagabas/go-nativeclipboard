@@ -449,6 +449,9 @@ var (
 	wl_display_flush            func(display wl_display) int32
 	wl_display_sync             func(display wl_display) uintptr
 	
+	// Note: These use ...interface{} for variadic args to match C's variadic functions.
+	// In a complete implementation, these would need careful handling of argument types
+	// to match the expected Wayland protocol message formats.
 	wl_proxy_marshal            func(proxy wl_proxy, opcode uint32, args ...interface{}) wl_proxy
 	wl_proxy_marshal_constructor func(proxy wl_proxy, opcode uint32, iface uintptr, args ...interface{}) wl_proxy
 	wl_proxy_marshal_constructor_versioned func(proxy wl_proxy, opcode uint32, iface uintptr, version uint32, args ...interface{}) wl_proxy
@@ -550,31 +553,15 @@ func initializeWayland() error {
 	purego.RegisterLibFunc(&wl_proxy_get_user_data, libwayland, "wl_proxy_get_user_data")
 	purego.RegisterLibFunc(&wl_proxy_set_user_data, libwayland, "wl_proxy_set_user_data")
 
-	// Connect to Wayland display
-	waylandState.display = wl_display_connect(nil)
-	if waylandState.display == 0 {
-		return fmt.Errorf("failed to connect to Wayland display")
-	}
-
-	// Get registry
-	waylandState.registry = wl_display_get_registry(waylandState.display)
-	if waylandState.registry == 0 {
-		wl_display_disconnect(waylandState.display)
-		return fmt.Errorf("failed to get Wayland registry")
-	}
-
 	// Note: A complete implementation would need to:
-	// 1. Add registry listener to bind to globals (compositor, seat, data_device_manager)
-	// 2. Do roundtrips to process events and get all globals
-	// 3. Create data_device from data_device_manager and seat
-	// 4. Set up event handlers for clipboard operations
+	// 1. Connect to Wayland display
+	// 2. Get registry and add listener to bind globals (compositor, seat, data_device_manager)
+	// 3. Do roundtrips to process events and get all globals
+	// 4. Create data_device from data_device_manager and seat
+	// 5. Set up event handlers for clipboard operations
 	//
 	// This requires implementing callback functions and event processing,
 	// which is complex with purego. For now, we return an error to use X11 fallback.
-
-	// Clean up and return error for now
-	wl_display_disconnect(waylandState.display)
-	waylandState.display = 0
 	
 	return fmt.Errorf("Wayland clipboard implementation in progress - falling back to X11")
 }
