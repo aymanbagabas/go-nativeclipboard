@@ -662,21 +662,23 @@ func writeWayland(t Format, buf []byte) (<-chan struct{}, error) {
 		return nil, fmt.Errorf("failed to start wl-copy: %w", err)
 	}
 
-	// Write data to stdin and wait for completion
-	go func() {
-		defer stdin.Close()
-		io.Copy(stdin, bytes.NewReader(buf))
-	}()
+	// Write data to stdin synchronously to avoid race with cmd.Wait()
+	_, err = io.Copy(stdin, bytes.NewReader(buf))
+	stdin.Close()
+	
+	if err != nil {
+		cmd.Wait() // Clean up the process
+		return nil, fmt.Errorf("failed to write to wl-copy: %w", err)
+	}
 
 	// Wait for command to complete
 	if err := cmd.Wait(); err != nil {
 		return nil, fmt.Errorf("wl-copy failed: %w", err)
 	}
 
-	// Create channel for change notification
-	// Note: Wayland doesn't provide direct notification when clipboard is overwritten
-	// We close the channel immediately since write completed successfully
-	// For monitoring actual changes, use Watch() instead
+	// Return a closed channel to indicate write completion
+	// Note: This channel does NOT signal when the clipboard is overwritten by another app.
+	// To monitor clipboard changes, use the Watch() function instead.
 	changed := make(chan struct{})
 	close(changed)
 
