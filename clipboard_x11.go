@@ -553,15 +553,35 @@ func initializeWayland() error {
 	purego.RegisterLibFunc(&wl_proxy_get_user_data, libwayland, "wl_proxy_get_user_data")
 	purego.RegisterLibFunc(&wl_proxy_set_user_data, libwayland, "wl_proxy_set_user_data")
 
-	// Note: A complete implementation would need to:
-	// 1. Connect to Wayland display
-	// 2. Get registry and add listener to bind globals (compositor, seat, data_device_manager)
-	// 3. Do roundtrips to process events and get all globals
-	// 4. Create data_device from data_device_manager and seat
-	// 5. Set up event handlers for clipboard operations
+	// TODO: Complete Wayland implementation
+	// The following steps are required to finish Wayland clipboard support:
 	//
-	// This requires implementing callback functions and event processing,
-	// which is complex with purego. For now, we return an error to use X11 fallback.
+	// 1. Connect to display:
+	//    waylandState.display = wl_display_connect(nil)
+	//
+	// 2. Get registry and implement listener callbacks:
+	//    - Need to implement C-compatible callback functions using purego
+	//    - Registry listener must handle "global" events to bind interfaces
+	//    - Bind to: wl_compositor, wl_seat, wl_data_device_manager
+	//
+	// 3. Create data device:
+	//    waylandState.dataDevice = wl_data_device_manager_get_data_device(manager, seat)
+	//
+	// 4. Implement clipboard operations:
+	//    - For READ: Listen for wl_data_offer, negotiate MIME types, read from fd
+	//    - For WRITE: Create wl_data_source, offer MIME types, write to fd on request
+	//
+	// 5. Event loop:
+	//    - Implement event processing with wl_display_dispatch
+	//    - Handle async nature of Wayland protocol
+	//
+	// Main challenges:
+	// - purego callback implementation for Wayland event handlers
+	// - File descriptor-based data transfer (os.Pipe + io.Copy)
+	// - State machine for async clipboard protocol
+	// - Thread safety with goroutines and Wayland display connection
+	//
+	// For now, return error to gracefully fall back to X11
 	
 	return fmt.Errorf("Wayland clipboard implementation in progress - falling back to X11")
 }
