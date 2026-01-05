@@ -387,7 +387,7 @@ func watch(ctx context.Context, t Format) <-chan []byte {
 
 	// Use X11 implementation
 	recv := make(chan []byte, 1)
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(clipboardPollInterval)
 	last, _ := read(t)
 
 	go func() {
@@ -503,6 +503,21 @@ const (
 	mimeTypeImagePNG      = "image/png"
 )
 
+// Clipboard polling interval for watch operations
+const clipboardPollInterval = time.Second
+
+// getMimeType returns the MIME type string for a given clipboard Format
+func getMimeType(t Format) (string, error) {
+	switch t {
+	case Text:
+		return mimeTypeTextPlainUtf8, nil
+	case Image:
+		return mimeTypeImagePNG, nil
+	default:
+		return "", ErrUnsupported
+	}
+}
+
 // initializeWayland attempts to initialize Wayland clipboard support
 func initializeWayland() error {
 	// Check if WAYLAND_DISPLAY is set
@@ -600,15 +615,10 @@ func readWayland(t Format) ([]byte, error) {
 		return nil, fmt.Errorf("Wayland clipboard requires wl-copy/wl-paste tools")
 	}
 
-	// Determine MIME type
-	var mimeType string
-	switch t {
-	case Text:
-		mimeType = "text/plain;charset=utf-8"
-	case Image:
-		mimeType = "image/png"
-	default:
-		return nil, ErrUnsupported
+	// Get MIME type for the requested format
+	mimeType, err := getMimeType(t)
+	if err != nil {
+		return nil, err
 	}
 
 	// Use wl-paste to read from clipboard
@@ -639,15 +649,10 @@ func writeWayland(t Format, buf []byte) (<-chan struct{}, error) {
 		return nil, fmt.Errorf("Wayland clipboard requires wl-copy/wl-paste tools")
 	}
 
-	// Determine MIME type
-	var mimeType string
-	switch t {
-	case Text:
-		mimeType = "text/plain;charset=utf-8"
-	case Image:
-		mimeType = "image/png"
-	default:
-		return nil, ErrUnsupported
+	// Get MIME type for the requested format
+	mimeType, err := getMimeType(t)
+	if err != nil {
+		return nil, err
 	}
 
 	// Use wl-copy to write to clipboard
@@ -697,9 +702,8 @@ func watchWayland(ctx context.Context, t Format) <-chan []byte {
 	go func() {
 		defer close(ch)
 
-		// Use 1 second polling interval to balance responsiveness and performance
-		// This matches the X11 implementation's interval
-		ticker := time.NewTicker(time.Second)
+		// Use consistent polling interval across all implementations
+		ticker := time.NewTicker(clipboardPollInterval)
 		defer ticker.Stop()
 
 		var lastData []byte
