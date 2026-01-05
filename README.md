@@ -133,13 +133,13 @@ Use the pre-defined constants:
 
 ## Platform Support
 
-| Platform        | Status      | Implementation                   |
-| --------------- | ----------- | -------------------------------- |
-| macOS           | ✅ Complete | NSPasteboard via purego/objc     |
-| Linux (X11)     | ✅ Complete | X11 via purego (requires libX11) |
-| Linux (Wayland) | 🚧 Planned  | Not yet implemented              |
-| Windows         | ✅ Complete | Win32 API via syscall            |
-| FreeBSD         | ✅ Complete | X11 via purego (requires libX11) |
+| Platform        | Status      | Implementation                      |
+| --------------- | ----------- | ----------------------------------- |
+| macOS           | ✅ Complete | NSPasteboard via purego/objc        |
+| Linux (X11)     | ✅ Complete | X11 via purego (requires libX11)    |
+| Linux (Wayland) | ✅ Complete | wl-copy/wl-paste (wl-clipboard pkg) |
+| Windows         | ✅ Complete | Win32 API via syscall               |
+| FreeBSD         | ✅ Complete | X11 via purego (requires libX11)    |
 
 ### Linux Requirements
 
@@ -158,7 +158,22 @@ Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
 export DISPLAY=:99.0
 ```
 
-**Wayland (not yet supported):** Wayland clipboard support is planned but not yet implemented. If you're using Wayland, you'll need XWayland compatibility layer with X11 libraries installed for the clipboard to work.
+**Wayland (supported):** Wayland clipboard support uses the `wl-clipboard` package (`wl-copy` and `wl-paste` commands). The library will automatically detect and use Wayland when `WAYLAND_DISPLAY` is set. If wl-clipboard is not available, it falls back to X11 via XWayland.
+
+Install wl-clipboard for full Wayland support:
+
+```bash
+# Debian/Ubuntu
+sudo apt install wl-clipboard
+
+# Fedora/RHEL
+sudo dnf install wl-clipboard
+
+# Arch Linux
+sudo pacman -S wl-clipboard
+```
+
+The library automatically tries Wayland first (if `WAYLAND_DISPLAY` is set and `wl-clipboard` is installed), then falls back to X11 (if `DISPLAY` is set). This ensures compatibility with both display servers.
 
 ### FreeBSD Requirements
 
@@ -188,9 +203,10 @@ go test -gcflags="github.com/ebitengine/purego/internal/fakecgo=-std" ./...
 This library uses different approaches per platform:
 
 - **macOS**: Calls Objective-C runtime and AppKit (NSPasteboard) using purego/objc
-- **Linux (X11)**: Dynamically loads libX11.so and calls X11 clipboard functions via purego
-- **FreeBSD**: Same X11 implementation as Linux, with automatic detection of FreeBSD-specific library paths
-- **Linux (Wayland)**: Not yet implemented - planned for future release
+- **Linux**: Automatically detects and uses the available display server:
+  - **Wayland**: Uses `wl-copy` and `wl-paste` from wl-clipboard package when available
+  - **X11** (fallback): Dynamically loads libX11.so and calls X11 clipboard functions via purego
+- **FreeBSD**: Uses X11 implementation with automatic detection of FreeBSD-specific library paths
 - **Windows**: Uses Win32 clipboard API (user32.dll, kernel32.dll) via Go's syscall package
 
 All approaches avoid cgo entirely, resulting in faster builds and easier cross-compilation.
