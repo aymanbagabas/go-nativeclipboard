@@ -84,7 +84,10 @@ type sourceListener struct {
 
 var sourceListenerInstance sourceListener
 
-// Callback functions for source events
+// sourceHandleSend is a Wayland protocol callback invoked when the compositor requests clipboard data.
+// This is called when another application wants to paste our clipboard content.
+// The callback writes the stored clipboard data to the provided file descriptor.
+//
 //go:uintptrescapes
 func sourceHandleSend(data uintptr, source wlProxy, mimeType *byte, fd int32) {
 	// This is called when the compositor requests clipboard data
@@ -109,6 +112,9 @@ func sourceHandleSend(data uintptr, source wlProxy, mimeType *byte, fd int32) {
 	}()
 }
 
+// sourceHandleCancelled is a Wayland protocol callback invoked when our clipboard data is replaced.
+// This is called when another application writes to the clipboard, cancelling our data source.
+//
 //go:uintptrescapes
 func sourceHandleCancelled(data uintptr, source wlProxy) {
 	// This is called when our clipboard data is replaced
@@ -133,7 +139,10 @@ var (
 	waylandInitErr           error
 )
 
-// Callback functions
+// registryHandleGlobal is a Wayland protocol callback invoked for each global object in the registry.
+// This callback discovers and binds to required Wayland interfaces (wl_seat, zwlr_data_control_manager_v1).
+// It's called during wl_display_roundtrip to enumerate all available Wayland globals.
+//
 //go:uintptrescapes
 func registryHandleGlobal(data uintptr, registry wlProxy, name uint32, iface *byte, version uint32) {
 	interfaceName := ptrToString(iface)
@@ -506,7 +515,7 @@ func watchWayland(ctx context.Context, t Format) <-chan []byte {
 	return recv
 }
 
-// Detect if we're running under Wayland or X11
+// isWaylandSession detects if we're running under Wayland or X11
 func isWaylandSession() bool {
 	// Check for Wayland display socket
 	waylandDisplay := os.Getenv("WAYLAND_DISPLAY")
@@ -521,16 +530,4 @@ func isWaylandSession() bool {
 	}
 
 	return false
-}
-
-// Helper to convert Format to MIME type
-func waylandMimeType(t Format) string {
-	switch t {
-	case Text:
-		return "text/plain;charset=utf-8"
-	case Image:
-		return "image/png"
-	default:
-		return ""
-	}
 }

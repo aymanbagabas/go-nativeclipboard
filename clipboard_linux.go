@@ -72,7 +72,7 @@ func watchLinux(ctx context.Context, t Format) <-chan []byte {
 		ch := watchWayland(ctx, t)
 		// Try to check if channel is immediately closed
 		select {
-		case _, ok := <-ch:
+		case data, ok := <-ch:
 			if !ok {
 				// Fallback to X11
 				return watchX11(ctx, t)
@@ -81,7 +81,9 @@ func watchLinux(ctx context.Context, t Format) <-chan []byte {
 			newCh := make(chan []byte, 1)
 			go func() {
 				defer close(newCh)
-				// Forward all values from ch
+				// Send the received value first
+				newCh <- data
+				// Forward all remaining values from ch
 				for data := range ch {
 					newCh <- data
 				}
