@@ -178,6 +178,13 @@ func initialize() error {
 }
 
 func read(t Format) ([]byte, error) {
+	// Check if Wayland is being used
+	if useWayland {
+		// Wayland implementation not yet complete
+		return nil, fmt.Errorf("Wayland clipboard read not yet implemented")
+	}
+
+	// Use X11 implementation
 	var atomType string
 	switch t {
 	case Text:
@@ -265,6 +272,13 @@ func readX11(atomType string) ([]byte, error) {
 }
 
 func write(t Format, buf []byte) (<-chan struct{}, error) {
+	// Check if Wayland is being used
+	if useWayland {
+		// Wayland implementation not yet complete
+		return nil, fmt.Errorf("Wayland clipboard write not yet implemented")
+	}
+
+	// Use X11 implementation
 	var atomType string
 	switch t {
 	case Text:
