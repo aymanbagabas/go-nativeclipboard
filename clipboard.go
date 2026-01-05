@@ -32,6 +32,8 @@ var (
 	ErrUnavailable = errors.New("clipboard unavailable")
 	// ErrUnsupported indicates the requested format is not supported
 	ErrUnsupported = errors.New("unsupported format")
+	// ErrUnsupportedPlatform indicates the platform does not support clipboard operations
+	ErrUnsupportedPlatform = errors.New("unsupported platform")
 )
 
 // Format represents a clipboard data format.
