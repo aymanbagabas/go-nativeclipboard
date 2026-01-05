@@ -10,7 +10,7 @@ This file documents everything an AI agent needs to know to work effectively in 
 - **Module**: `github.com/aymanbagabas/go-nativeclipboard`
 - **Key Dependencies**: 
   - `github.com/ebitengine/purego` - For calling native APIs without cgo
-- **Status**: macOS, Linux, FreeBSD, and Windows implementations complete
+- **Status**: macOS, Windows, and FreeBSD implementations complete; Linux with X11 complete and Wayland in progress
 
 ## Project Structure
 
@@ -18,7 +18,8 @@ This file documents everything an AI agent needs to know to work effectively in 
 .
 ├── clipboard.go          # Main API and public interfaces
 ├── clipboard_darwin.go   # macOS implementation (NSPasteboard via purego)
-├── clipboard_x11.go      # X11 implementation for Linux and FreeBSD (via purego)
+├── clipboard_x11.go      # Linux implementation (X11 and Wayland via purego)
+├── clipboard_freebsd.go  # FreeBSD implementation (X11 via purego)
 ├── clipboard_windows.go  # Windows implementation (Win32 API via syscall)
 ├── clipboard_test.go     # Platform-agnostic tests
 ├── doc.go               # Package documentation for pkg.go.dev
@@ -105,15 +106,29 @@ Platform-specific files use build constraints:
 //go:build windows
 ```
 
+### Linux Implementation (In Progress)
+
+Linux clipboard support is split across two implementations:
+
+**Build tags**: `//go:build linux && !android`
+
+**Implementation**: clipboard_x11.go
+
+The Linux implementation automatically detects and uses the available display server:
+1. Tries Wayland first (if WAYLAND_DISPLAY is set)
+2. Falls back to X11 (if DISPLAY is set)
+3. Returns error if neither is available
+
 ### X11 Implementation (Linux and FreeBSD - Complete)
+
+**Linux**: Uses clipboard_x11.go with automatic detection
+**FreeBSD**: Uses clipboard_freebsd.go (dedicated file)
 
 Uses purego to call X11 library functions directly:
 
-**Note**: Only FreeBSD is supported among BSD systems, as purego officially supports FreeBSD only.
-
 1. **Dynamic library loading**:
    - Dynamically loads libX11.so using `purego.Dlopen`
-   - Searches common paths: libX11.so.6, libX11.so
+   - Linux paths: libX11.so.6, libX11.so
    - FreeBSD-specific paths: /usr/local/lib, /usr/X11R6/lib
    
 2. **X11 API**:
@@ -136,6 +151,58 @@ Uses purego to call X11 library functions directly:
 
 5. **Thread safety**:
    - Use `runtime.LockOSThread()` for thread-sensitive operations
+
+### Wayland Implementation (Linux - In Progress)
+
+**Build tags**: `//go:build linux && !android`
+
+**Implementation**: clipboard_x11.go (integrated with X11 for runtime selection)
+
+Uses purego to call Wayland library functions directly:
+
+1. **Dynamic library loading**:
+   - Dynamically loads libwayland-client.so using `purego.Dlopen`
+   - Searches common paths: libwayland-client.so.0, libwayland-client.so
+   
+2. **Wayland protocols needed**:
+   - `wl_display` - Connection to Wayland compositor
+   - `wl_registry` - Global object registry
+   - `wl_seat` - Input device access
+   - `wl_data_device_manager` - Clipboard management protocol
+   - `wl_data_source` - Providing clipboard data (write operations)
+   - `wl_data_offer` - Receiving clipboard data (read operations)
+
+3. **Implementation challenges**:
+   - Wayland uses async event-driven architecture with callbacks
+   - Requires proper event loop handling
+   - Data transfer via file descriptors (pipes)
+   - Need to bind to registry globals and handle events
+   - Complex state management for clipboard ownership
+
+4. **Current status**:
+   - Library loading: ✅ Complete
+   - Function registration: ✅ Complete
+   - Display connection: ✅ Complete
+   - Registry setup: 🚧 In progress
+   - Event loop: ❌ Not yet implemented
+   - Read operations: ❌ Not yet implemented
+   - Write operations: ❌ Not yet implemented
+   - Falls back to X11 for now
+
+5. **Requirements**:
+   - libwayland-client must be installed
+   - WAYLAND_DISPLAY environment variable must be set
+   - **CGO_ENABLED=0** - No cgo required (pure Go)
+
+### FreeBSD Implementation (Complete)
+
+**Build tags**: `//go:build freebsd`
+
+**Implementation**: clipboard_freebsd.go (dedicated file with X11 support)
+
+Uses the same X11 implementation as Linux, with FreeBSD-specific library paths.
+
+**Note**: FreeBSD only supports X11, not Wayland.
 
 ### macOS Implementation (Complete)
 
