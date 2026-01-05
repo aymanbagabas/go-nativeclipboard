@@ -10,7 +10,7 @@ This file documents everything an AI agent needs to know to work effectively in 
 - **Module**: `github.com/aymanbagabas/go-nativeclipboard`
 - **Key Dependencies**: 
   - `github.com/ebitengine/purego` - For calling native APIs without cgo
-- **Status**: macOS, Windows, and FreeBSD implementations complete; Linux with X11 complete and Wayland in progress
+- **Status**: All platform implementations complete (macOS, Windows, FreeBSD, Linux X11, and Linux Wayland)
 
 ## Project Structure
 
@@ -18,7 +18,9 @@ This file documents everything an AI agent needs to know to work effectively in 
 .
 ├── clipboard.go          # Main API and public interfaces
 ├── clipboard_darwin.go   # macOS implementation (NSPasteboard via purego)
-├── clipboard_x11.go      # Linux implementation (X11 and Wayland via purego)
+├── clipboard_linux.go    # Linux routing layer (Wayland/X11 detection and fallback)
+├── clipboard_wayland.go  # Linux Wayland implementation (zwlr_data_control via purego)
+├── clipboard_x11.go      # Linux X11 implementation (X11 via purego)
 ├── clipboard_freebsd.go  # FreeBSD implementation (X11 via purego)
 ├── clipboard_windows.go  # Windows implementation (Win32 API via syscall)
 ├── clipboard_test.go     # Platform-agnostic tests
@@ -108,20 +110,24 @@ Platform-specific files use build constraints:
 
 ### Linux Implementation (Complete)
 
-Linux clipboard support is split across two implementations:
+Linux clipboard support is split across three files:
 
 **Build tags**: `//go:build linux && !android`
 
-**Implementation**: clipboard_x11.go
+**Files**:
+- `clipboard_linux.go` - Routing layer that detects session type and routes to appropriate implementation
+- `clipboard_wayland.go` - Wayland implementation using zwlr_data_control protocol
+- `clipboard_x11.go` - X11 implementation
 
 The Linux implementation automatically detects and uses the available display server:
-1. Tries Wayland first (if WAYLAND_DISPLAY is set and wl-clipboard is installed)
-2. Falls back to X11 (if DISPLAY is set)
-3. Returns error if neither is available
+1. Checks for Wayland session (WAYLAND_DISPLAY or XDG_SESSION_TYPE=wayland)
+2. Tries Wayland first if detected
+3. Falls back to X11 if Wayland initialization fails or not available
+4. Returns error if neither is available
 
 ### X11 Implementation (Linux and FreeBSD - Complete)
 
-**Linux**: Uses clipboard_x11.go with automatic detection
+**Linux**: Uses clipboard_x11.go with functions: initializeX11, readX11, writeX11, watchX11
 **FreeBSD**: Uses clipboard_freebsd.go (dedicated file)
 
 Uses purego to call X11 library functions directly:
@@ -156,44 +162,57 @@ Uses purego to call X11 library functions directly:
 
 **Build tags**: `//go:build linux && !android`
 
-**Implementation**: clipboard_x11.go (integrated with X11 for runtime selection)
+**Implementation**: clipboard_wayland.go (dedicated file with pure purego implementation)
 
-Uses the wl-clipboard tools (wl-copy and wl-paste) for reliable Wayland clipboard access:
+Uses the `zwlr_data_control_manager_v1` protocol via purego to interface with libwayland-client:
 
-1. **External tools approach**:
-   - Uses `wl-copy` command for writing to clipboard
-   - Uses `wl-paste` command for reading from clipboard
-   - These tools from wl-clipboard package are battle-tested and reliable
+1. **Pure purego approach**:
+   - Dynamically loads libwayland-client.so
+   - Uses `purego.NewCallback` for Wayland event handlers
+   - No external tools or cgo required
    
-2. **Why external tools**:
-   - Wayland clipboard protocol requires complex event-driven callbacks
-   - Implementing callbacks with purego has significant limitations:
-     - Callback lifetime management is complex
-     - Event loop integration with fd-based dispatch is challenging
-     - Interface matching requires exact C struct layouts
-   - wl-clipboard tools are standard and widely available
-   - Simpler, more maintainable, and more reliable than reimplementation
+2. **Protocol implementation**:
+   - Registry callbacks to discover and bind globals (wl_seat, zwlr_data_control_manager_v1)
+   - Data control device creation for clipboard access
+   - Data offer handling for reading clipboard (with file descriptor transfer)
+   - Data source handling for writing clipboard (with send callbacks)
+   - Event loop integration using wl_display_dispatch
 
-3. **Supported formats**:
+3. **Key features**:
+   - Uses `zwlr_data_control_manager_v1` protocol (wlroots extension)
+   - File descriptor-based data transfer using `syscall.Pipe2`
+   - Proper callback handling with `purego.NewCallback`
+   - Thread-safe operations with `sync.Mutex`
+   - Multiple text format offerings for compatibility (text/plain, TEXT, STRING, UTF8_STRING)
+
+4. **Supported formats**:
    - Text: text/plain;charset=utf-8
    - Images: image/png
 
-4. **Current status**:
-   - ✅ Tool detection and execution
-   - ✅ Read operations via wl-paste
-   - ✅ Write operations via wl-copy
-   - ✅ Automatic fallback to X11 if tools unavailable
-   - ✅ Full feature parity with X11
+5. **Current status**:
+   - ✅ Full protocol implementation complete
+   - ✅ Registry event handling
+   - ✅ Read operations via zwlr_data_control_offer_v1
+   - ✅ Write operations via zwlr_data_control_source_v1
+   - ✅ Watch operations with polling
+   - ✅ Automatic fallback to X11 if Wayland unavailable
 
-5. **Requirements**:
-   - wl-clipboard package must be installed (`wl-copy` and `wl-paste` commands)
+6. **Requirements**:
+   - libwayland-client must be installed
    - WAYLAND_DISPLAY environment variable must be set
+   - Compositor must support zwlr_data_control_manager_v1 (most modern compositors do)
    - **CGO_ENABLED=0** - No cgo required (pure Go)
 
-6. **References**:
-   - [wl-clipboard](https://github.com/bugaevc/wl-clipboard) - C implementation
-   - [wl-clipboard-rs](https://github.com/YaLTeR/wl-clipboard-rs) - Rust implementation
-   - Both use proper Wayland protocol bindings rather than purego-style dynamic loading
+7. **Implementation notes**:
+   - Based on the C wl-clipboard implementation
+   - Uses purego for FFI without cgo
+   - Callback functions use `//go:uintptrescapes` directive
+   - Event loop runs in goroutines for write operations
+   - Proper resource cleanup and error handling
+
+8. **References**:
+   - [wl-clipboard](https://github.com/bugaevc/wl-clipboard) - C reference implementation
+   - [wlr-protocols](https://gitlab.freedesktop.org/wlroots/wlr-protocols) - Protocol definitions
 
 ### FreeBSD Implementation (Complete)
 
