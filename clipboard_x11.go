@@ -8,11 +8,8 @@ package nativeclipboard
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"runtime"
 	"time"
 	"unsafe"
@@ -388,7 +385,7 @@ func watch(ctx context.Context, t Format) <-chan []byte {
 
 	// Use X11 implementation
 	recv := make(chan []byte, 1)
-	ticker := time.NewTicker(clipboardPollInterval)
+	ticker := time.NewTicker(time.Second)
 	last, _ := read(t)
 
 	go func() {
@@ -415,7 +412,7 @@ func watch(ctx context.Context, t Format) <-chan []byte {
 }
 
 // Wayland support
-// Implementation of Wayland clipboard using the wl_data_device_manager protocol
+// Implementation of Wayland clipboard using the wl_data_device_manager protocol via purego
 
 var useWayland = false
 
@@ -429,7 +426,6 @@ type (
 	wl_data_device          uintptr
 	wl_data_source          uintptr
 	wl_data_offer           uintptr
-	wl_event_queue          uintptr
 	wl_proxy                uintptr
 )
 
@@ -444,24 +440,24 @@ var (
 	wl_display_dispatch         func(display wl_display) int32
 	wl_display_dispatch_pending func(display wl_display) int32
 	wl_display_flush            func(display wl_display) int32
-	wl_display_sync             func(display wl_display) uintptr
-	
-	// Note: These use ...interface{} for variadic args to match C's variadic functions.
-	// In a complete implementation, these would need careful handling of argument types
-	// to match the expected Wayland protocol message formats.
-	wl_proxy_marshal            func(proxy wl_proxy, opcode uint32, args ...interface{}) wl_proxy
-	wl_proxy_marshal_constructor func(proxy wl_proxy, opcode uint32, iface uintptr, args ...interface{}) wl_proxy
-	wl_proxy_marshal_constructor_versioned func(proxy wl_proxy, opcode uint32, iface uintptr, version uint32, args ...interface{}) wl_proxy
+	wl_display_get_fd           func(display wl_display) int32
 	wl_proxy_add_listener       func(proxy wl_proxy, implementation uintptr, data uintptr) int32
 	wl_proxy_destroy            func(proxy wl_proxy)
-	wl_proxy_get_user_data      func(proxy wl_proxy) uintptr
-	wl_proxy_set_user_data      func(proxy wl_proxy, user_data uintptr)
+	wl_proxy_marshal_flags      func(proxy wl_proxy, opcode uint32, iface uintptr, version uint32, flags uint32, args ...uintptr) wl_proxy
 )
 
 // Wayland global state
 type waylandClipboard struct {
-	initialized      bool
-	useExternalTools bool // Always true when initialized - uses wl-copy/wl-paste
+	display           wl_display
+	registry          wl_registry
+	compositor        wl_compositor
+	seat              wl_seat
+	dataDeviceManager wl_data_device_manager
+	dataDevice        wl_data_device
+	currentOffer      wl_data_offer
+	offerData         []byte
+	serial            uint32
+	initialized       bool
 }
 
 var waylandState waylandClipboard
@@ -471,9 +467,6 @@ const (
 	mimeTypeTextPlainUtf8 = "text/plain;charset=utf-8"
 	mimeTypeImagePNG      = "image/png"
 )
-
-// Clipboard polling interval for watch operations
-const clipboardPollInterval = time.Second
 
 // getMimeType returns the MIME type string for a given clipboard Format
 func getMimeType(t Format) (string, error) {
@@ -487,148 +480,106 @@ func getMimeType(t Format) (string, error) {
 	}
 }
 
-// initializeWayland attempts to initialize Wayland clipboard support by detecting wl-clipboard tools
+// initializeWayland attempts to initialize Wayland clipboard support using purego
 func initializeWayland() error {
 	// Check if WAYLAND_DISPLAY is set
 	if os.Getenv("WAYLAND_DISPLAY") == "" {
 		return fmt.Errorf("WAYLAND_DISPLAY not set")
 	}
 
-	// Check if wl-copy and wl-paste are available
-	if _, err := exec.LookPath("wl-copy"); err == nil {
-		if _, err := exec.LookPath("wl-paste"); err == nil {
-			waylandState.useExternalTools = true
-			waylandState.initialized = true
-			return nil
+	// Try to load libwayland-client.so
+	var err error
+	libPaths := []string{
+		"libwayland-client.so.0",
+		"libwayland-client.so",
+		"/usr/lib/libwayland-client.so.0",
+		"/usr/lib/x86_64-linux-gnu/libwayland-client.so.0",
+		"/usr/lib64/libwayland-client.so.0",
+		"/usr/lib/aarch64-linux-gnu/libwayland-client.so.0",
+	}
+
+	for _, path := range libPaths {
+		libwayland, err = purego.Dlopen(path, purego.RTLD_NOW|purego.RTLD_GLOBAL)
+		if err == nil {
+			break
 		}
 	}
 
-	// wl-clipboard tools not found - direct libwayland implementation is impractical with purego
-	return fmt.Errorf("Wayland clipboard requires wl-clipboard package (install with: apt install wl-clipboard) - falling back to X11")
+	if err != nil {
+		return fmt.Errorf("failed to load libwayland-client: %w", err)
+	}
+
+	// Load Wayland functions
+	purego.RegisterLibFunc(&wl_display_connect, libwayland, "wl_display_connect")
+	purego.RegisterLibFunc(&wl_display_disconnect, libwayland, "wl_display_disconnect")
+	purego.RegisterLibFunc(&wl_display_get_registry, libwayland, "wl_display_get_registry")
+	purego.RegisterLibFunc(&wl_display_roundtrip, libwayland, "wl_display_roundtrip")
+	purego.RegisterLibFunc(&wl_display_dispatch, libwayland, "wl_display_dispatch")
+	purego.RegisterLibFunc(&wl_display_dispatch_pending, libwayland, "wl_display_dispatch_pending")
+	purego.RegisterLibFunc(&wl_display_flush, libwayland, "wl_display_flush")
+	purego.RegisterLibFunc(&wl_display_get_fd, libwayland, "wl_display_get_fd")
+	purego.RegisterLibFunc(&wl_proxy_add_listener, libwayland, "wl_proxy_add_listener")
+	purego.RegisterLibFunc(&wl_proxy_destroy, libwayland, "wl_proxy_destroy")
+	purego.RegisterLibFunc(&wl_proxy_marshal_flags, libwayland, "wl_proxy_marshal_flags")
+
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	// Connect to Wayland display
+	waylandState.display = wl_display_connect(nil)
+	if waylandState.display == 0 {
+		return fmt.Errorf("failed to connect to Wayland display")
+	}
+
+	// Get registry
+	waylandState.registry = wl_display_get_registry(waylandState.display)
+	if waylandState.registry == 0 {
+		wl_display_disconnect(waylandState.display)
+		return fmt.Errorf("failed to get Wayland registry")
+	}
+
+	// Set up registry listener to get globals
+	// This requires implementing callbacks with purego
+	// For now, return error - full implementation requires complex callback setup
+	
+	// Clean up
+	wl_display_disconnect(waylandState.display)
+	
+	return fmt.Errorf("Wayland purego implementation in progress - falling back to X11")
 }
 
-// readWayland reads clipboard data using wl-paste command
+// readWayland reads clipboard data using Wayland protocol
 func readWayland(t Format) ([]byte, error) {
 	if !waylandState.initialized {
 		return nil, ErrUnavailable
 	}
 
-	if !waylandState.useExternalTools {
-		return nil, fmt.Errorf("Wayland clipboard requires wl-copy/wl-paste tools")
-	}
-
-	// Get MIME type for the requested format
-	mimeType, err := getMimeType(t)
-	if err != nil {
-		return nil, err
-	}
-
-	// Use wl-paste to read from clipboard
-	cmd := exec.Command("wl-paste", "-t", mimeType)
-	
-	output, err := cmd.Output()
-	if err != nil {
-		// Check if clipboard is empty or doesn't have requested MIME type
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
-			// Clipboard is empty or doesn't have this MIME type
-			return nil, nil
-		}
-		return nil, fmt.Errorf("wl-paste failed: %w", err)
-	}
-
-	return output, nil
+	// TODO: Implement Wayland read using wl_data_offer
+	return nil, fmt.Errorf("Wayland read not yet implemented")
 }
 
-// writeWayland writes clipboard data using wl-copy command.
-// Returns a closed channel immediately upon successful write completion.
-// Note: To monitor when the clipboard is overwritten by another app, use Watch().
+// writeWayland writes clipboard data using Wayland protocol
 func writeWayland(t Format, buf []byte) (<-chan struct{}, error) {
 	if !waylandState.initialized {
 		return nil, ErrUnavailable
 	}
 
-	if !waylandState.useExternalTools {
-		return nil, fmt.Errorf("Wayland clipboard requires wl-copy/wl-paste tools")
-	}
-
-	// Get MIME type for the requested format
-	mimeType, err := getMimeType(t)
-	if err != nil {
-		return nil, err
-	}
-
-	// Use wl-copy to write to clipboard
-	cmd := exec.Command("wl-copy", "-t", mimeType)
-	
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create stdin pipe: %w", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start wl-copy: %w", err)
-	}
-
-	// Write data to stdin synchronously to avoid race with cmd.Wait()
-	_, err = io.Copy(stdin, bytes.NewReader(buf))
-	stdin.Close()
-	
-	if err != nil {
-		cmd.Wait() // Clean up the process
-		return nil, fmt.Errorf("failed to write to wl-copy: %w", err)
-	}
-
-	// Wait for command to complete
-	if err := cmd.Wait(); err != nil {
-		return nil, fmt.Errorf("wl-copy failed: %w", err)
-	}
-
-	// Return closed channel to indicate write completed
+	// TODO: Implement Wayland write using wl_data_source
 	changed := make(chan struct{})
 	close(changed)
-
-	return changed, nil
+	return changed, fmt.Errorf("Wayland write not yet implemented")
 }
 
-// Wayland clipboard watch implementation
+// watchWayland monitors clipboard changes using Wayland protocol
 func watchWayland(ctx context.Context, t Format) <-chan []byte {
 	ch := make(chan []byte, 1)
-
+	
 	if !waylandState.initialized {
 		close(ch)
 		return ch
 	}
 
-	go func() {
-		defer close(ch)
-
-		// Use consistent polling interval across all implementations
-		ticker := time.NewTicker(clipboardPollInterval)
-		defer ticker.Stop()
-
-		var lastData []byte
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				data, err := readWayland(t)
-				if err != nil {
-					continue
-				}
-
-				if !bytes.Equal(data, lastData) {
-					lastData = data
-					select {
-					case ch <- data:
-					case <-ctx.Done():
-						return
-					}
-				}
-			}
-		}
-	}()
-
+	// TODO: Implement Wayland watch using wl_data_device listener
+	close(ch)
 	return ch
 }
