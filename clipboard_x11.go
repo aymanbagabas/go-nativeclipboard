@@ -182,8 +182,7 @@ func initialize() error {
 func read(t Format) ([]byte, error) {
 	// Check if Wayland is being used
 	if useWayland {
-		// Wayland implementation not yet complete
-		return nil, fmt.Errorf("Wayland clipboard read not yet implemented")
+		return readWayland(t)
 	}
 
 	// Use X11 implementation
@@ -276,8 +275,7 @@ func readX11(atomType string) ([]byte, error) {
 func write(t Format, buf []byte) (<-chan struct{}, error) {
 	// Check if Wayland is being used
 	if useWayland {
-		// Wayland implementation not yet complete
-		return nil, fmt.Errorf("Wayland clipboard write not yet implemented")
+		return writeWayland(t, buf)
 	}
 
 	// Use X11 implementation
@@ -382,17 +380,13 @@ func write(t Format, buf []byte) (<-chan struct{}, error) {
 }
 
 func watch(ctx context.Context, t Format) <-chan []byte {
-	recv := make(chan []byte, 1)
-	
 	// Check if Wayland is being used
 	if useWayland {
-		// Wayland implementation not yet complete
-		// Return empty channel that closes immediately
-		close(recv)
-		return recv
+		return watchWayland(ctx, t)
 	}
 
 	// Use X11 implementation
+	recv := make(chan []byte, 1)
 	ticker := time.NewTicker(time.Second)
 	last, _ := read(t)
 
@@ -668,7 +662,7 @@ func writeWayland(t Format, buf []byte) (<-chan struct{}, error) {
 		return nil, fmt.Errorf("failed to start wl-copy: %w", err)
 	}
 
-	// Write data to stdin
+	// Write data to stdin and wait for completion
 	go func() {
 		defer stdin.Close()
 		io.Copy(stdin, bytes.NewReader(buf))
@@ -680,16 +674,11 @@ func writeWayland(t Format, buf []byte) (<-chan struct{}, error) {
 	}
 
 	// Create channel for change notification
-	// In Wayland, we don't get notification when clipboard is overwritten
-	// So we return a channel that never closes (or closes when process exits)
+	// Note: Wayland doesn't provide direct notification when clipboard is overwritten
+	// We close the channel immediately since write completed successfully
+	// For monitoring actual changes, use Watch() instead
 	changed := make(chan struct{})
-	
-	// Monitor clipboard changes in background
-	go func() {
-		// We could monitor by polling wl-paste, but that's inefficient
-		// For now, just keep the channel open
-		// A full implementation would use wl_data_device listeners
-	}()
+	close(changed)
 
 	return changed, nil
 }
@@ -706,7 +695,9 @@ func watchWayland(ctx context.Context, t Format) <-chan []byte {
 	go func() {
 		defer close(ch)
 
-		ticker := time.NewTicker(500 * time.Millisecond)
+		// Use 1 second polling interval to balance responsiveness and performance
+		// This matches the X11 implementation's interval
+		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 
 		var lastData []byte
