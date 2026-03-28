@@ -10,15 +10,15 @@ import (
 )
 
 func initialize() error {
-	return ErrUnavailable
+	return ErrUnsupportedPlatform
 }
 
 func read(t Format) ([]byte, error) {
-	return nil, ErrUnavailable
+	return nil, ErrUnsupportedPlatform
 }
 
 func write(t Format, buf []byte) (<-chan struct{}, error) {
-	return nil, ErrUnavailable
+	return nil, ErrUnsupportedPlatform
 }
 
 func watch(ctx context.Context, t Format) <-chan []byte {
