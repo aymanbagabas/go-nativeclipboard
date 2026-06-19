@@ -21,7 +21,7 @@ jobs:
       CGO_ENABLED: "0"
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Install Go
         uses: actions/setup-go@v6
         with:
@@ -62,7 +62,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       
       - name: Test on ${{ matrix.os.name }}
         uses: cross-platform-actions/action@v0.32.0
